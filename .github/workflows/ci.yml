@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  core:
+    name: "@ps/core — typecheck + tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Typecheck (all workspaces)
+        run: npm run typecheck
+      - name: Unit + integration tests
+        run: npm test
+
+  tenant-isolation:
+    name: "RLS tenant isolation (pgTAP, live DB)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Start Supabase (Postgres + Auth)
+        run: supabase start
+      - name: Apply migrations + seed (≥2 tenants)
+        run: supabase db reset
+      - name: Run RLS tenant-isolation suite (rls-tenant-audit)
+        run: supabase test db
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop
