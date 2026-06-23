@@ -165,7 +165,9 @@ const builds = (
           phase: 'Build',
           schema: BUILD,
           label: `build:${s}`,
-          isolation: 'worktree',
+          // Lanes own disjoint paths (packages/core, supabase, apps/*) so they build
+          // directly in the working tree. Re-enable isolation:'worktree' only if two
+          // lanes ever edit the same files AND you add a merge-back step.
         }
       )
     )
@@ -237,7 +239,7 @@ if (blockers.length > 0) {
         return agent(
           `You are the ${ENGINEER[s]}. Fix these verified BLOCKER findings in your lane, then re-run ps-verify.\n\n` +
             mine.map((m) => `- ${m.title} (${m.file}): ${m.fix}`).join('\n'),
-          { agentType: ENGINEER[s], phase: 'Reconcile', label: `fix:${s}`, isolation: 'worktree' }
+          { agentType: ENGINEER[s], phase: 'Reconcile', label: `fix:${s}` }
         );
       })
     )
