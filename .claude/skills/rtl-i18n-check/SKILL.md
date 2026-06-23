@@ -6,18 +6,25 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # rtl-i18n-check
 
-The product is Arabic-first and RTL. UI that hardcodes English or doesn't mirror is a defect.
+The product is Arabic-first and RTL. UI that hardcodes English or doesn't mirror is a defect. Reference: `docs/reference/mobile-patterns.md` (i18n/RTL) and `design-system.md`.
 
 ## Checks
-1. **No hardcoded user-facing strings.** Every visible string comes from the i18n resource (e.g. `t('...')`). Grep changed UI files for string literals inside JSX/Text and flag any that aren't keys, icons, or test ids.
-2. **RTL layout.** Layouts mirror correctly: directional padding/margins use start/end (not hardcoded left/right), chevrons/arrows point the RTL direction, lists/progress fill from the right. Flag `marginLeft`/`paddingRight`-style hardcoding in directional contexts.
-3. **Numerals.** Money and counts that the trial showed as Arabic-Indic use the shared digit helper, not raw Latin digits.
-4. **No clipped Arabic.** Text containers allow Arabic ascenders/diacritics; no fixed heights that clip.
-5. **Key coverage.** Every new i18n key used in code exists in the Arabic resource file; no missing-key fallbacks shipping to users.
+1. **No hardcoded user-facing strings.** Every visible string comes from i18n (`t('...')`). Sweep changed UI files for JSX/`<Text>`/`<AppText>` string literals that aren't keys, icon names, or testIDs:
+   ```
+   # candidate offenders (review hits by hand — not all are bugs)
+   grep -rnE ">[^<{]*[A-Za-z؀-ۿ]{2,}[^<}]*<" apps/*/ --include=*.tsx
+   ```
+2. **RTL layout.** Directional spacing uses start/end, not hardcoded left/right; rows use `row-reverse`; chevrons/progress fill RTL.
+   ```
+   grep -rnE "marginLeft|marginRight|paddingLeft|paddingRight|left:|right:|textAlign: '(left|right)'" apps/*/ --include=*.tsx
+   ```
+3. **Numerals.** Displayed money/counts use `toArabicDigits`/`formatEgp`, not raw Latin digits in user-facing text.
+4. **No clipped Arabic.** No fixed heights on text containers that would clip Arabic ascenders/diacritics.
+5. **Key coverage.** Every `t('key')` used resolves in the Arabic resource (`ar.json`); no missing-key fallbacks shipping to users. Cross-check used keys against the resource file.
 
 ## How to run
-- `grep`/Grep the changed files under `apps/` for: JSX text literals, `marginLeft|marginRight|paddingLeft|paddingRight|left:|right:`, and raw money formatting.
-- Confirm new `t('key')` references resolve in the i18n resources.
+- Run the greps above over the changed files; review each hit (some left/right uses are non-directional and fine — judge in context).
+- Confirm new `t('key')` references exist in `ar.json`.
 
 ## Output
-A list of findings (file:line → issue → fix) grouped by check, plus a PASS/FAIL. Empty findings = PASS.
+Findings grouped by check: `file:line → issue → fix`. Empty findings = **PASS**. This complements `ps-verify`; both must be clean before review.

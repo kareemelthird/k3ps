@@ -9,17 +9,25 @@ This project is built by a team of specialized agents, run like a software compa
 | `product-manager` | Specs & backlog | `docs/specs`, `docs/BACKLOG.md` | deep-research |
 | `architect` | System/DB design, **tenant isolation**, ADRs | `docs/adr`, `docs/design` | adr-write, deep-research, MS-Learn |
 | `ux-designer` | RTL UX, design system, component contracts | `docs/design` | ui-ux-pro-max, magic MCP |
-| `core-engineer` | Pure logic: pricing/money/time/inventory | `packages/core` | pricing-engine-guard, ps-verify |
-| `backend-engineer` | Schema, migrations, RLS, edge funcs | `supabase/` | supabase-migrate, rls-tenant-audit, ps-verify |
-| `mobile-engineer` | Expo counter/manager app | `apps/mobile` | rtl-i18n-check, ps-verify |
+| `core-engineer` | Pure logic: pricing/money/time/inventory | `packages/core` | port-from-pochinki, pricing-engine-guard, ps-verify |
+| `backend-engineer` | Schema, migrations, RLS, edge funcs | `supabase/` | port-from-pochinki, supabase-migrate, rls-tenant-audit, ps-verify |
+| `mobile-engineer` | Expo counter/manager app | `apps/mobile` | port-from-pochinki, offline-outbox-guard, rtl-i18n-check, ps-verify |
 | `web-engineer` | Owner dashboard + super-admin | `apps/web` | rtl-i18n-check, ps-verify |
-| `qa-tester` | Tests, verification, acceptance gating | tests across repo | ps-verify, pricing-engine-guard, rls-tenant-audit, verify |
+| `qa-tester` | Tests, verification, acceptance gating | tests across repo | ps-verify, pricing-engine-guard, rls-tenant-audit, offline-outbox-guard, verify |
 | `code-reviewer` | Correctness + cleanliness (read-only) | review findings | code-review, simplify |
 | `security-reviewer` | Auth/RLS/isolation audit (read-only) | security sign-off | security-review, rls-tenant-audit |
 | `devops` | Monorepo tooling, CI/CD, builds, env | tooling, CI | ps-verify |
-| `docs-writer` | Keeps docs/CLAUDE.md accurate | `docs/`, READMEs | — |
+| `docs-writer` | Keeps docs + handbook accurate | `docs/`, READMEs | phase-gate |
 
-The **orchestrator** is the main Claude Code session driving the workflows below. It coordinates, mediates the debate, and assembles the human-gate summary.
+The **orchestrator** is the main Claude Code session driving the workflows below. It coordinates, mediates the debate, and assembles the human-gate summary (via the `phase-gate` skill).
+
+## Engineering handbook (`docs/reference/`)
+
+The team's shared, code-grounded knowledge — distilled from the trial so agents don't rediscover it. Agents read the relevant file before building:
+- `core-api.md` — exact `@ps/core` port targets (signatures, invariants).
+- `schema-and-rls.md` — trial schema/RLS + the multi-tenant deltas.
+- `mobile-patterns.md` — outbox, stores, query layer, timers, kit, i18n, navigation.
+- `design-system.md` — exact tokens (hex/type/spacing) + established flows.
 
 ## The workflow (per feature / phase)
 

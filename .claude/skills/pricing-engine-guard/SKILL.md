@@ -6,24 +6,26 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # pricing-engine-guard
 
-Money correctness is the product's trust. These invariants must hold in `@ps/core`.
+Money correctness is the product's trust. These invariants must hold in `@ps/core`. Reference signatures: `docs/reference/core-api.md`.
 
-## Invariants to check
-1. **Integer piastres only.** No float arithmetic on money; no `parseFloat`/`*100` rounding hacks that can drift. Conversions go through the shared `toPiastres`/`formatEGP` helpers.
-2. **Round once per segment.** Rounding (to `rounding_minutes`) and `min_charge` are applied per segment, not re-applied on the sum. The total is `Σ rounded segment costs + Σ order items − discount`.
-3. **Prepaid is locked.** Once a prepaid block is purchased, its price is immutable — a later rate-rule change does not re-price it. There must be a test asserting this.
-4. **Determinism / purity.** No `Date.now()` inside cost math; timestamps and timezone are passed in. Same inputs → same output.
-5. **Segment reconstruction.** A bill can be recomputed from stored snapshots (rule id + price snapshot + start/end) without the live rate rules.
-6. **Peak / day boundaries.** Crossing a peak window or weekend (Africa/Cairo, Fri/Sat) opens a new segment with the correct rate.
-7. **Inventory ledger.** On-hand = Σ deltas; oversell is guarded; a void reverses the exact movements it created.
+## Invariants — each must be covered by a test
+1. **Integer piastres only.** No float arithmetic on money; conversions go through `egpToPiastres`/`formatEgp`. Grep the diff for `parseFloat`, `* 100`, `/ 100`, `toFixed` on money paths and confirm they're not introducing drift.
+2. **Round once per segment.** `roundUpMinutes` and `min_charge_minutes` apply per segment / once at session level — never re-applied on the sum. Total = `Σ rounded segment costs + Σ order items − discount`.
+3. **Prepaid lock.** Non-null `prepaid_total` is charged **exactly** (including `0`); a later rate-rule change never re-prices it. There must be an explicit test (trial's `prepaidLock.test.ts` is the model).
+4. **Determinism / purity.** No `Date.now()` inside cost math; `at_iso` + timezone are passed in. Same inputs → same output. No React/RN/Expo/Next/Supabase import anywhere in `packages/core`.
+5. **Segment reconstruction.** A bill recomputes from stored snapshots (`rate_rule_id` + `price_per_hour_snapshot` + start/end) without the live rules.
+6. **Peak / day boundaries.** Crossing a peak window or weekend (Africa/Cairo, **Fri+Sat**) opens a new segment at the correct rate; `isWithinWindow` end is exclusive and wraps past midnight.
+7. **Inventory ledger.** On-hand = Σ delta (can go negative = oversell signal); a void reverses the exact movements of its sale; `stockStatus` boundaries (`<=0` out, `<=low` low) hold.
+8. **Rule resolution.** Highest `priority` wins, ties broken by id; all of device_type/play_mode/billing_mode/day_type/time-window respected.
 
 ## How to run
 ```
-npm --workspace packages/core test
 npm --workspace packages/core run typecheck
+npm --workspace packages/core test -- --coverage
+grep -rnE "no-(framework)-imports" packages/core/src   # sanity: ensure no react/react-native/expo/next/supabase import
 ```
-- Confirm tests exist for each invariant above; if one is missing, that is a gap to report (and ideally to add).
-- Check coverage stays **>90%** on pricing/money/time/inventory.
+- Confirm a test exists for each invariant above; a missing one is a gap to report (and ideally add).
+- Coverage must stay **>90%** on pricing/money/time/inventory.
 
 ## Output
-A checklist: each invariant → covered-by-test? PASS/FAIL, plus coverage numbers. Flag any invariant lacking a guarding test.
+A checklist: each invariant → covered-by-test? PASS/FAIL, plus coverage numbers and any framework-import violations. Flag any invariant lacking a guarding test.

@@ -116,5 +116,6 @@ Rules for agents:
 - Roadmap & phases: `docs/ROADMAP.md`
 - Backlog: `docs/BACKLOG.md`
 - The team (org chart, ownership, handoffs): `docs/AGENTS.md`
+- **Engineering handbook** (distilled from the trial — read before building): `docs/reference/` — `core-api.md`, `schema-and-rls.md`, `mobile-patterns.md`, `design-system.md`
 - Architecture decisions: `docs/adr/`
 - Reference trial (read-only, do not modify): `D:\K3\Pochinki`

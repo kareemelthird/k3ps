@@ -9,18 +9,20 @@ allowed-tools: Read, Write, Edit, Grep, Glob
 Capture significant decisions so the team (human + agent) understands the "why" later.
 
 ## When to write one
-Any decision that is costly to reverse or shapes the architecture: tenant isolation model, package manager, database/schema strategy, auth/JWT-claim model, major dependency, API contract style.
+Any decision costly to reverse or that shapes the architecture: tenant isolation model, package manager, schema/migration strategy, auth/JWT-claim model, a major dependency, an API-contract style. Reversible details don't need an ADR.
 
 ## How
-1. Find the next number in `docs/adr/` (zero-padded) and copy the structure from `docs/adr/0000-template.md`.
-2. File: `docs/adr/NNNN-short-title.md`.
-3. Fill every section:
-   - **Status** — Proposed / Accepted / Superseded (link).
-   - **Context** — the problem, constraints (link `CLAUDE.md` sections), and forces at play.
-   - **Options considered** — at least 2, each with pros/cons and evidence. **Cite research** (URLs) where used.
-   - **Decision** — what we chose and the single most important reason.
-   - **Consequences** — what becomes easy, what becomes hard, follow-up work, and what must be verified (e.g. isolation tests).
-4. Never rewrite an Accepted ADR — supersede it with a new one and link both ways.
+1. Find the next number in `docs/adr/` (zero-padded). File: `docs/adr/NNNN-short-title.md`. Copy the structure from `docs/adr/0000-template.md`.
+2. Fill every section:
+   - **Status** — Proposed / Accepted / Superseded by ADR-NNNN (link both ways).
+   - **Context** — the problem, constraints (link `CLAUDE.md` and `docs/reference/*` sections), forces in tension.
+   - **Options considered** — **≥2**, each with pros/cons and **cited evidence (URLs)**.
+   - **Decision** — what was chosen and the single most important reason.
+   - **Consequences** — what gets easy, what gets hard, follow-up work, and **what must be verified** (e.g. `rls-tenant-audit` isolation tests, performance) and who signs off (`security-reviewer` for tenancy/auth).
+3. **Never rewrite an Accepted ADR** — supersede it with a new one and cross-link.
+
+## Tie-in
+For big decisions with multiple viable options, the orchestrator runs the **`architecture-decision`** workflow (judge panel) and this skill writes up the winner. Always feed runner-up strengths into Consequences.
 
 ## Output
-The path of the ADR written and a one-paragraph summary for the human-gate. Decisions affecting tenancy/security must be flagged for `security-reviewer` and the human approver.
+The ADR path + a one-paragraph summary for the human gate. Tenancy/security decisions are flagged for `security-reviewer` and the human approver.
