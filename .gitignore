@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+.pnp/
+.yarn/
+
+# Builds / bundles
+dist/
+build/
+.next/
+.expo/
+.expo-shared/
+*.tsbuildinfo
+coverage/
+web-build/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Supabase
+supabase/.branches/
+supabase/.temp/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Claude Code local
+.claude/settings.local.json
+.claude/.session/
