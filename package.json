@@ -16,5 +16,8 @@
     "lint": "npm run lint --workspaces --if-present",
     "verify": "echo \"Use the ps-verify skill: typecheck + test + expo export + next build\""
   },
-  "packageManager": "npm@10.0.0"
+  "packageManager": "npm@10.0.0",
+  "devDependencies": {
+    "supabase": "^2.107.0"
+  }
 }
