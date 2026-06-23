@@ -35,17 +35,23 @@ export function LiveCost({
   opts,
   className = '',
 }: LiveCostProps) {
-  const [, setTick] = useState(0);
+  // `now` stays null on the server AND the first client render, so the SSR HTML
+  // and the initial hydration match exactly (no hydration mismatch). The current
+  // instant is only read AFTER mount, in the effect — never during render.
+  const [now, setNow] = useState<string | null>(null);
 
-  // Tick only causes re-render; cost is re-derived from startedAt each time.
   useEffect(() => {
-    const interval = setInterval(() => setTick((t) => t + 1), tickMs);
+    setNow(nowIso()); // first live value, post-mount
+    const interval = setInterval(() => setNow(nowIso()), tickMs);
     return () => clearInterval(interval);
   }, [tickMs]);
 
-  // Pass an explicit "now" ISO to keep openMeterCostPiastres pure/testable.
-  const piastres = openMeterCostPiastres(startedAt, nowIso(), ratePerHourPiastres, opts);
-  const display = formatEgp(piastres);
+  // Cost is always re-derived from startedAt + an explicit instant (pure/testable).
+  // Before mount we render a stable placeholder identical on server and client.
+  const display =
+    now === null
+      ? '—'
+      : formatEgp(openMeterCostPiastres(startedAt, now, ratePerHourPiastres, opts));
 
   return (
     <span

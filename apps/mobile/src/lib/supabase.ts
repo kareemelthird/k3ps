@@ -10,6 +10,7 @@
  * AsyncStorage is retained only for non-sensitive data (e.g. activeBranchId).
  */
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // ─── SecureStore-backed storage adapter ──────────────────────────────────────
@@ -94,6 +95,24 @@ const SecureStoreAdapter = {
   },
 };
 
+// ─── Web storage adapter ─────────────────────────────────────────────────────
+// expo-secure-store is native-only (Keychain/Keystore); it is unavailable in the
+// Expo web preview. On web we fall back to localStorage, guarded by `typeof
+// window` so importing/SSR never crashes. Native keeps the secure, chunked store.
+const WebStorageAdapter = {
+  async getItem(key: string): Promise<string | null> {
+    return typeof window !== 'undefined' ? window.localStorage.getItem(key) : null;
+  },
+  async setItem(key: string, value: string): Promise<void> {
+    if (typeof window !== 'undefined') window.localStorage.setItem(key, value);
+  },
+  async removeItem(key: string): Promise<void> {
+    if (typeof window !== 'undefined') window.localStorage.removeItem(key);
+  },
+};
+
+const authStorage = Platform.OS === 'web' ? WebStorageAdapter : SecureStoreAdapter;
+
 // ─── Supabase client ──────────────────────────────────────────────────────────
 
 let _client: SupabaseClient | null = null;
@@ -113,8 +132,8 @@ function getClient(): SupabaseClient {
 
   _client = createClient(url, anonKey, {
     auth: {
-      // SECURITY: auth tokens stored in SecureStore, not AsyncStorage
-      storage: SecureStoreAdapter,
+      // SECURITY: native uses SecureStore (Keychain/Keystore); web uses localStorage.
+      storage: authStorage,
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,
