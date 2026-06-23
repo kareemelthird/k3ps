@@ -1,0 +1,139 @@
+{
+  "meta": {
+    "appName": "PS Management",
+    "superAdmin": "لوحة تحكم المشرف"
+  },
+  "nav": {
+    "tenants": "العملاء",
+    "auditLog": "سجل التدقيق",
+    "settings": "الإعدادات"
+  },
+  "tenants": {
+    "title": "العملاء",
+    "provision": "تجهيز عميل جديد",
+    "search": "بحث عن عميل...",
+    "filterAll": "الكل",
+    "filterActive": "نشط",
+    "filterSuspended": "موقوف",
+    "empty": "لا يوجد عملاء بعد",
+    "emptyAction": "جهّز أول عميل",
+    "errorLoad": "تعذّر تحميل العملاء",
+    "retry": "إعادة المحاولة",
+    "offline": "غير متصل — الإجراءات معطّلة",
+    "columns": {
+      "tenant": "العميل",
+      "status": "الحالة",
+      "branches": "الفروع",
+      "owner": "المالك",
+      "created": "تاريخ الإنشاء",
+      "actions": "إجراءات"
+    },
+    "actions": {
+      "open": "فتح",
+      "impersonate": "الدخول كـ...",
+      "suspend": "تعليق",
+      "reactivate": "إعادة التفعيل"
+    },
+    "status": {
+      "active": "نشط",
+      "suspended": "موقوف"
+    }
+  },
+  "provision": {
+    "title": "تجهيز عميل جديد",
+    "step1": "بيانات النشاط",
+    "step2": "المالك الأول",
+    "tenantName": "اسم النشاط التجاري",
+    "tenantNameRequired": "اسم النشاط مطلوب",
+    "slug": "المعرّف (Slug)",
+    "slugHelper": "يُستخدم في الروابط ولا يمكن تغييره لاحقاً",
+    "slugInvalid": "يجب أن يحتوي فقط على أحرف صغيرة وأرقام وشرطة",
+    "timezone": "المنطقة الزمنية",
+    "timezoneNote": "منطق يوم العمل يستخدم Africa/Cairo",
+    "ownerName": "اسم المالك",
+    "ownerNameRequired": "اسم المالك مطلوب",
+    "ownerEmail": "البريد الإلكتروني للمالك",
+    "ownerEmailRequired": "البريد الإلكتروني مطلوب",
+    "ownerEmailInvalid": "بريد إلكتروني غير صحيح",
+    "inviteMode": "إرسال دعوة",
+    "passwordMode": "تعيين كلمة مرور مؤقتة",
+    "summary": "سيتم إنشاء العميل + أول مالك وتسجيلها في سجل التدقيق",
+    "submit": "تجهيز العميل",
+    "submitting": "جارٍ التجهيز...",
+    "success": "تم تجهيز العميل بنجاح",
+    "error": "فشل تجهيز العميل. يرجى المحاولة مرة أخرى.",
+    "prev": "السابق",
+    "next": "التالي"
+  },
+  "tenantDetail": {
+    "overview": "نظرة عامة",
+    "members": "الأعضاء والمالكون",
+    "branches": "الفروع",
+    "recentAudit": "آخر أحداث التدقيق",
+    "dangerZone": "منطقة الخطر",
+    "suspend": "تعليق العميل",
+    "reactivate": "إعادة تفعيل العميل",
+    "suspendConfirmTitle": "تعليق العميل؟",
+    "suspendConfirmBody": "سيتم إيقاف وصول جميع مستخدمي هذا العميل. اكتب اسم العميل للتأكيد.",
+    "suspendConfirmPlaceholder": "اكتب اسم العميل",
+    "suspendConfirmMismatch": "الاسم لا يتطابق",
+    "suspendSuccess": "تم تعليق العميل",
+    "impersonate": "الدخول كـ هذا العميل",
+    "branchCount": "الفروع",
+    "deviceCount": "الأجهزة",
+    "memberCount": "الأعضاء"
+  },
+  "impersonation": {
+    "dialogTitle": "الدخول كـ {tenantName}",
+    "dialogBody": "ستتصرّف داخل بيانات هذا العميل كأنك المالك.",
+    "timeLimitNote": "الجلسة محدودة بـ {duration} دقيقة وتنتهي تلقائيًا.",
+    "auditNote": "سيُسجَّل الدخول والخروج في سجل التدقيق.",
+    "reasonLabel": "سبب الدخول (للتدقيق)",
+    "reasonPlaceholder": "مثال: طلب دعم فني من المالك",
+    "reasonRequired": "سبب الدخول مطلوب للتدقيق",
+    "durationLabel": "مدة الجلسة (دقيقة)",
+    "cancel": "إلغاء",
+    "confirm": "الدخول كـ {tenantName}",
+    "submitting": "جارٍ بدء الجلسة...",
+    "bannerText": "أنت تتصرّف كـ {tenantName}",
+    "bannerExpiry": "تنتهي الجلسة في",
+    "endNow": "إنهاء الآن",
+    "endConfirmTitle": "إنهاء الدخول المؤقت؟",
+    "endConfirmBody": "سيتم إنهاء جلسة الدخول وتسجيل الخروج في سجل التدقيق.",
+    "endConfirm": "إنهاء الجلسة",
+    "endCancel": "متابعة الجلسة",
+    "endSuccess": "تم إنهاء الدخول المؤقت",
+    "expiredTitle": "انتهت جلسة الدخول المؤقت",
+    "expiredBody": "انتهت مهلة جلسة الدخول إلى {tenantName}.",
+    "returnToConsole": "العودة إلى لوحة التحكم"
+  },
+  "auditLog": {
+    "title": "سجل التدقيق",
+    "filterActor": "المُنفِّذ",
+    "filterAction": "الإجراء",
+    "filterTenant": "العميل",
+    "filterDateRange": "نطاق التاريخ",
+    "columns": {
+      "timestamp": "الوقت",
+      "actor": "المُنفِّذ",
+      "action": "الإجراء",
+      "tenant": "العميل",
+      "amount": "المبلغ",
+      "detail": "التفاصيل"
+    },
+    "empty": "لا توجد سجلات مطابقة",
+    "errorLoad": "تعذّر تحميل سجل التدقيق"
+  },
+  "common": {
+    "loading": "جارٍ التحميل...",
+    "error": "حدث خطأ",
+    "retry": "إعادة المحاولة",
+    "confirm": "تأكيد",
+    "cancel": "إلغاء",
+    "save": "حفظ",
+    "close": "إغلاق",
+    "required": "مطلوب",
+    "yes": "نعم",
+    "no": "لا"
+  }
+}

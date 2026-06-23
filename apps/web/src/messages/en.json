@@ -1,0 +1,139 @@
+{
+  "meta": {
+    "appName": "PS Management",
+    "superAdmin": "Super-Admin Console"
+  },
+  "nav": {
+    "tenants": "Tenants",
+    "auditLog": "Audit Log",
+    "settings": "Settings"
+  },
+  "tenants": {
+    "title": "Tenants",
+    "provision": "Provision tenant",
+    "search": "Search tenants...",
+    "filterAll": "All",
+    "filterActive": "Active",
+    "filterSuspended": "Suspended",
+    "empty": "No tenants yet",
+    "emptyAction": "Provision the first tenant",
+    "errorLoad": "Failed to load tenants",
+    "retry": "Retry",
+    "offline": "Offline — mutations disabled",
+    "columns": {
+      "tenant": "Tenant",
+      "status": "Status",
+      "branches": "Branches",
+      "owner": "Owner",
+      "created": "Created",
+      "actions": "Actions"
+    },
+    "actions": {
+      "open": "Open",
+      "impersonate": "Impersonate",
+      "suspend": "Suspend",
+      "reactivate": "Reactivate"
+    },
+    "status": {
+      "active": "Active",
+      "suspended": "Suspended"
+    }
+  },
+  "provision": {
+    "title": "Provision new tenant",
+    "step1": "Business details",
+    "step2": "First owner",
+    "tenantName": "Business name",
+    "tenantNameRequired": "Business name is required",
+    "slug": "Slug (identifier)",
+    "slugHelper": "Used in URLs; cannot be changed later",
+    "slugInvalid": "Only lowercase letters, numbers, and hyphens",
+    "timezone": "Timezone",
+    "timezoneNote": "Business-day logic uses Africa/Cairo",
+    "ownerName": "Owner full name",
+    "ownerNameRequired": "Owner name is required",
+    "ownerEmail": "Owner email",
+    "ownerEmailRequired": "Owner email is required",
+    "ownerEmailInvalid": "Invalid email address",
+    "inviteMode": "Send invite",
+    "passwordMode": "Set temp password",
+    "summary": "Creates tenant + first owner and writes an audit entry",
+    "submit": "Provision tenant",
+    "submitting": "Provisioning...",
+    "success": "Tenant provisioned successfully",
+    "error": "Failed to provision tenant. Please try again.",
+    "prev": "Back",
+    "next": "Next"
+  },
+  "tenantDetail": {
+    "overview": "Overview",
+    "members": "Members & owners",
+    "branches": "Branches",
+    "recentAudit": "Recent audit",
+    "dangerZone": "Danger zone",
+    "suspend": "Suspend tenant",
+    "reactivate": "Reactivate tenant",
+    "suspendConfirmTitle": "Suspend tenant?",
+    "suspendConfirmBody": "All users of this tenant will lose access. Type the tenant name to confirm.",
+    "suspendConfirmPlaceholder": "Type tenant name",
+    "suspendConfirmMismatch": "Name does not match",
+    "suspendSuccess": "Tenant suspended",
+    "impersonate": "Impersonate this tenant",
+    "branchCount": "Branches",
+    "deviceCount": "Devices",
+    "memberCount": "Members"
+  },
+  "impersonation": {
+    "dialogTitle": "Impersonate {tenantName}",
+    "dialogBody": "You will act inside this tenant's data as the owner.",
+    "timeLimitNote": "This session is limited to {duration} minutes and ends automatically.",
+    "auditNote": "Entry and exit are written to the audit log.",
+    "reasonLabel": "Reason (for audit)",
+    "reasonPlaceholder": "E.g. Owner requested support",
+    "reasonRequired": "A reason is required for the audit log",
+    "durationLabel": "Session duration (minutes)",
+    "cancel": "Cancel",
+    "confirm": "Impersonate {tenantName}",
+    "submitting": "Starting session...",
+    "bannerText": "You are acting as {tenantName}",
+    "bannerExpiry": "Session expires in",
+    "endNow": "End now",
+    "endConfirmTitle": "End impersonation?",
+    "endConfirmBody": "The session will be ended and logged in the audit trail.",
+    "endConfirm": "End session",
+    "endCancel": "Continue session",
+    "endSuccess": "Impersonation session ended",
+    "expiredTitle": "Impersonation session expired",
+    "expiredBody": "Your session impersonating {tenantName} has expired.",
+    "returnToConsole": "Return to console"
+  },
+  "auditLog": {
+    "title": "Audit Log",
+    "filterActor": "Actor",
+    "filterAction": "Action",
+    "filterTenant": "Tenant",
+    "filterDateRange": "Date range",
+    "columns": {
+      "timestamp": "Timestamp",
+      "actor": "Actor",
+      "action": "Action",
+      "tenant": "Tenant",
+      "amount": "Amount",
+      "detail": "Detail"
+    },
+    "empty": "No audit entries match the current filters",
+    "errorLoad": "Failed to load audit log"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "An error occurred",
+    "retry": "Retry",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "save": "Save",
+    "close": "Close",
+    "required": "Required",
+    "yes": "Yes",
+    "no": "No"
+  }
+}

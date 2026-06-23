@@ -1,0 +1,147 @@
+/**
+ * Global CSS — PS-Managment design tokens (Calm Operations direction).
+ *
+ * Design system: docs/design/design-system.md
+ * Tokens match the shared brand across mobile (Expo) and web (Next.js + Tailwind).
+ * Dark-first: dark palette is the default; light palette applied via [data-theme="light"].
+ *
+ * RULES:
+ *   - Components consume semantic CSS custom properties, never raw hex.
+ *   - RTL layout via logical properties (margin-inline-start, etc.), never left/right.
+ *   - Money/time components must use tabular-nums and never reflow.
+ */
+
+:root {
+  /* ── Semantic tokens — dark (default) ─────────────────────────────────── */
+  --bg:           #080C13;  /* N950 */
+  --surface:      #0D131D;  /* N900 */
+  --surface-2:    #131A26;  /* N800 */
+  --surface-3:    #1E293B;  /* N700 */
+  --border:       #22304A;
+  --border-strong:#33476B;
+  --text:         #EEF2F6;  /* N50 — ≥7:1 on bg */
+  --text-muted:   #94A3B8;  /* N300 — ≥3:1 on surface */
+  --text-faint:   #64748B;  /* N400 — placeholder/disabled */
+  --primary:      #14B8A6;  /* T500 */
+  --primary-press:#0D9488;  /* T600 */
+  --on-primary:   #080C13;  /* text on primary fill */
+  --status-free:  #10B981;  /* G500 */
+  --status-busy:  #3B82F6;  /* B500 */
+  --status-maint: #64748B;  /* N400 */
+  --warning:      #F59E0B;  /* A500 */
+  --danger:       #EF4444;  /* R500 */
+  --info:         #3B82F6;  /* B500 */
+  --impersonation:#8B5CF6;  /* V500 — one-purpose token */
+  --scrim:        rgba(0, 0, 0, 0.6);
+
+  /* ── Spacing ──────────────────────────────────────────────────────────── */
+  --space-2xs: 4px;
+  --space-xs:  8px;
+  --space-sm:  12px;
+  --space-md:  16px;
+  --space-lg:  20px;
+  --space-xl:  24px;
+  --space-2xl: 32px;
+  --space-3xl: 48px;
+
+  /* ── Radius ───────────────────────────────────────────────────────────── */
+  --radius-xs: 8px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 9999px;
+
+  /* ── Elevation ────────────────────────────────────────────────────────── */
+  --e0: none;
+  --e1: 0 2px 8px rgba(0, 0, 0, 0.30);
+  --e2: 0 6px 16px rgba(0, 0, 0, 0.40);
+  --e3: 0 12px 28px rgba(0, 0, 0, 0.50);
+
+  /* ── Motion ───────────────────────────────────────────────────────────── */
+  --duration-fast: 150ms;
+  --duration-base: 220ms;
+  --duration-slow: 320ms;
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit:  cubic-bezier(0.4, 0, 1, 1);
+
+  /* ── Typography ───────────────────────────────────────────────────────── */
+  /* IBM Plex Sans Arabic via Google Fonts (Phase 3+ loads actual font) */
+  --font-primary: 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+/* Light theme override */
+[data-theme='light'] {
+  --bg:           #F8FAFC;
+  --surface:      #FFFFFF;
+  --surface-2:    #EEF2F6;
+  --surface-3:    #E2E8F0;
+  --border:       #CBD5E1;
+  --border-strong:#94A3B8;
+  --text:         #0D131D;
+  --text-muted:   #475569;
+  --text-faint:   #64748B;
+  --primary:      #0D9488;
+  --primary-press:#0F766E;
+  --on-primary:   #FFFFFF;
+  --status-free:  #059669;
+  --warning:      #D97706;
+  --danger:       #DC2626;
+  --impersonation:#7C3AED;
+  --scrim:        rgba(15, 23, 42, 0.45);
+}
+
+/* ── Base resets ──────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  /* Arabic-first: RTL by default, overridden to LTR for /en routes */
+  font-family: var(--font-primary);
+  font-size: 16px;
+  line-height: 1.5;
+  background-color: var(--bg);
+  color: var(--text);
+}
+
+body {
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Focus styles ─────────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Tabular numerals for money/timers ────────────────────────────────────── */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* ── LTR isolation for Latin tokens (email, slug, ID) ────────────────────── */
+[dir='rtl'] .ltr-isolated {
+  direction: ltr;
+  unicode-bidi: isolate;
+  display: inline-block;
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

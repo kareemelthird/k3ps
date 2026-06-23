@@ -1,0 +1,26 @@
+{
+  "name": "@ps/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PS-Managment web app: owner dashboard + super-admin portal. Next.js 14 + App Router + shadcn/ui + Tailwind.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@ps/core": "*",
+    "next": "^14.2.29",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "next-intl": "^3.26.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.1",
+    "@types/react": "^18.3.23",
+    "@types/react-dom": "^18.3.7",
+    "typescript": "^5.6.3"
+  }
+}
