@@ -42,30 +42,30 @@ select is(
     where tenant_id = 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb'),
   0::bigint, 'devices: A sees 0 of B''s rows (SELECT isolated)');
 
+-- 4-arg throws_ok: check SQLSTATE 42501 only (message text varies). NULL errmsg.
 select throws_ok(
   $$ insert into public.devices (id, tenant_id, branch_id, name, device_type, status, sort_order, is_active)
      values ('cccccccc-de01-4000-8000-000000000099',
              'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb',
              'bbbb0001-0000-4000-8000-bbbbbbbbbbbb',
              'Hijacked', 'PS5', 'free', 9, true) $$,
-  '42501',
+  '42501', NULL,
   'devices: cross-tenant INSERT (tenant_id=B) rejected by WITH CHECK');
 
-select is(
-  (with u as (
-     update public.devices set name = 'pwned'
-     where tenant_id = 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb'
-     returning 1)
-   select count(*) from u),
-  0::bigint, 'devices: UPDATE of B rows affects 0 rows');
+-- Data-modifying CTE must be at statement top level (not inside a sub-select).
+with u as (
+  update public.devices set name = 'pwned'
+  where tenant_id = 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb'
+  returning 1)
+select is((select count(*) from u), 0::bigint,
+  'devices: UPDATE of B rows affects 0 rows');
 
-select is(
-  (with d as (
-     delete from public.devices
-     where tenant_id = 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb'
-     returning 1)
-   select count(*) from d),
-  0::bigint, 'devices: DELETE of B rows affects 0 rows');
+with d as (
+  delete from public.devices
+  where tenant_id = 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb'
+  returning 1)
+select is((select count(*) from d), 0::bigint,
+  'devices: DELETE of B rows affects 0 rows');
 
 select lives_ok(
   $$ insert into public.devices (id, tenant_id, branch_id, name, device_type, status, sort_order, is_active)
