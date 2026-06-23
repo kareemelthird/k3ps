@@ -28,7 +28,26 @@
 -- super:     00000000-0000-4000-8000-000000000005
 
 -- =============================================================================
--- PROFILES
+-- AUTH USERS  (must exist first: profiles.id references auth.users(id))
+-- Minimal rows — the pgTAP isolation tests set request.jwt.claims manually, so
+-- working passwords/logins are not required here. The handle_new_user() trigger
+-- auto-creates a matching public.profiles row on insert; we upsert profiles
+-- below to set full_name / is_platform_admin.
+-- =============================================================================
+
+insert into auth.users
+  (instance_id, id, aud, role, email, email_confirmed_at,
+   raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+values
+  ('00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'owner.alpha@example.test',   now(), '{"provider":"email","providers":["email"]}', '{"full_name":"Owner Alpha"}',    now(), now()),
+  ('00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-000000000002', 'authenticated', 'authenticated', 'manager.alpha@example.test', now(), '{"provider":"email","providers":["email"]}', '{"full_name":"Manager Alpha"}',  now(), now()),
+  ('00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-000000000003', 'authenticated', 'authenticated', 'owner.bravo@example.test',   now(), '{"provider":"email","providers":["email"]}', '{"full_name":"Owner Bravo"}',    now(), now()),
+  ('00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-000000000004', 'authenticated', 'authenticated', 'manager.bravo@example.test', now(), '{"provider":"email","providers":["email"]}', '{"full_name":"Manager Bravo"}',  now(), now()),
+  ('00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-000000000005', 'authenticated', 'authenticated', 'admin@example.test',         now(), '{"provider":"email","providers":["email"]}', '{"full_name":"Platform Admin"}', now(), now())
+on conflict (id) do nothing;
+
+-- =============================================================================
+-- PROFILES  (the trigger created these from auth.users; upsert sets the rest)
 -- =============================================================================
 
 insert into public.profiles (id, full_name, is_platform_admin, is_active)
@@ -41,7 +60,10 @@ values
   ('00000000-0000-4000-8000-000000000004', 'Manager Bravo',      false, true),
   -- Super admin
   ('00000000-0000-4000-8000-000000000005', 'Platform Admin',     true,  true)
-on conflict (id) do nothing;
+on conflict (id) do update
+  set full_name         = excluded.full_name,
+      is_platform_admin = excluded.is_platform_admin,
+      is_active         = excluded.is_active;
 
 -- =============================================================================
 -- TENANTS
