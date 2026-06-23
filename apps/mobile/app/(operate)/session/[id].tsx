@@ -5,7 +5,8 @@
  * → free device → write audit_log → route back to grid.
  *
  * INVARIANT: timer value = elapsedSeconds(startedAt, now), never a counter.
- * Money = integer piastres via formatEgp. No floats. (CLAUDE.md §2)
+ * Money = integer piastres via openMeterCostPiastres/@ps/core. No floats. (CLAUDE.md §2)
+ * Times displayed in Africa/Cairo via localHm (CLAUDE.md §3).
  */
 import React, { useState } from 'react';
 import {
@@ -19,9 +20,10 @@ import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 
 import {
-  elapsedMinutes,
   formatEgp,
+  localHm,
   nowIso,
+  openMeterCostPiastres,
   toArabicDigits,
 } from '@ps/core';
 
@@ -39,17 +41,6 @@ import { OfflineBanner } from '../../../src/components/OfflineBanner';
 import { Skeleton } from '../../../src/components/Skeleton';
 import { StatusPill } from '../../../src/components/StatusPill';
 import { useTick } from '../../../src/hooks/useTick';
-
-function computeTimeCostPiastres(
-  startedAt: string,
-  endedAt: string,
-  pricePerHourSnapshot: number,
-): number {
-  // Open-meter: (elapsedMinutes / 60) * pricePerHour; rounded to whole piastres
-  const mins = elapsedMinutes(startedAt, endedAt);
-  const cost = (mins / 60) * pricePerHourSnapshot;
-  return Math.round(Math.max(0, cost));
-}
 
 export default function SessionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -94,6 +85,8 @@ export default function SessionDetailScreen() {
       ]);
 
       if (sessionRes.error) throw sessionRes.error;
+      // SHOULD-FIX: surface a missing-rate error rather than silently billing 0
+      if (segmentRes.error) throw segmentRes.error;
       return {
         session: sessionRes.data as {
           id: string;
@@ -108,7 +101,7 @@ export default function SessionDetailScreen() {
         },
         segment: segmentRes.data as {
           price_per_hour_snapshot: number;
-        } | null,
+        },
       };
     },
     refetchInterval: 30_000,
@@ -117,11 +110,12 @@ export default function SessionDetailScreen() {
   const session = data?.session;
   const segment = data?.segment;
 
-  // Compute live running total (integer piastres, @ps/core math)
+  // Compute live running total (integer piastres, @ps/core — never inline math)
+  // For a live session: pass nowIso() each tick. For closed: pass ended_at.
   const now = closedAt ?? nowIso();
   const liveTotalPiastres =
     session && segment
-      ? computeTimeCostPiastres(
+      ? openMeterCostPiastres(
           session.started_at,
           session.ended_at ?? now,
           segment.price_per_hour_snapshot,
@@ -130,14 +124,17 @@ export default function SessionDetailScreen() {
 
   const handleCloseConfirm = async () => {
     if (!session || !tenantId || !user) return;
+    // SHOULD-FIX: block close when rate snapshot is unavailable to avoid silent 0-billing
+    if (!segment) return;
     setClosing(true);
     const endedAt = nowIso();
 
     try {
-      const timeTotalPiastres = computeTimeCostPiastres(
+      // BLOCKER: use @ps/core openMeterCostPiastres — integer piastres, no inline floats
+      const timeTotalPiastres = openMeterCostPiastres(
         session.started_at,
         endedAt,
-        segment?.price_per_hour_snapshot ?? 0,
+        segment.price_per_hour_snapshot,
       );
 
       await closeSession({
@@ -243,13 +240,9 @@ export default function SessionDetailScreen() {
             <AppText role="caption" color={colors.textMuted}>
               {t('session.startedAt')}
             </AppText>
+            {/* SHOULD-FIX: use localHm (Africa/Cairo) — never device TZ */}
             <AppText role="caption" color={colors.textMuted}>
-              {toArabicDigits(
-                new Date(session.started_at).toLocaleTimeString('ar-EG', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                }),
-              )}
+              {toArabicDigits(localHm(session.started_at))}
             </AppText>
           </View>
         </View>

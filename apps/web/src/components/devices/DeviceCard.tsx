@@ -11,6 +11,7 @@ import { formatEgp } from '@ps/core';
 import type { Device } from '@ps/core';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { LiveTimer } from '@/components/ui/LiveTimer';
+import { LiveCost } from '@/components/ui/LiveCost';
 
 interface DeviceCardProps {
   device: Device;
@@ -19,6 +20,8 @@ interface DeviceCardProps {
     id: string;
     started_at: string;
     grand_total: number;
+    /** Rate snapshot from the first segment — used for live cost display. */
+    price_per_hour_snapshot?: number | null;
   } | null;
 }
 
@@ -69,13 +72,22 @@ export function DeviceCard({ device, session }: DeviceCardProps) {
             tickMs={15000}
             size="md"
           />
-          <span
-            className="text-money tabular-nums text-primary"
-            // Money is not directional — keep LTR layout for tabular numerals
-            dir="ltr"
-          >
-            {formatEgp(session.grand_total)}
-          </span>
+          {session.price_per_hour_snapshot != null ? (
+            <LiveCost
+              startedAt={session.started_at}
+              ratePerHourPiastres={session.price_per_hour_snapshot}
+              tickMs={15000}
+              className="text-money"
+            />
+          ) : (
+            <span
+              className="text-money tabular-nums text-primary"
+              // Money is not directional — keep LTR layout for tabular numerals
+              dir="ltr"
+            >
+              {formatEgp(session.grand_total)}
+            </span>
+          )}
         </div>
       )}
 

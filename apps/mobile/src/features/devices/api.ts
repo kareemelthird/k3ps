@@ -3,13 +3,16 @@
  * All queries are tenant + branch scoped (RLS-enforced, and explicit filter to
  * never accidentally read outside the active tenant/branch).
  * Mutations use client-generated UUIDs + upsert (idempotent).
+ *
+ * BLOCKER (Phase 3): offline outbox is deferred to Phase 8. Enqueue calls are
+ * removed; all writes are direct (idempotent upsert with onConflict:'id').
+ * outbox.ts stays in place (reserved for Phase 8) but nothing calls enqueue here.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { nowIso, uuidv4 } from '@ps/core';
 import type { Device, PlayMode, Session } from '@ps/core';
 
 import { supabase } from '../../lib/supabase';
-import { enqueue } from '../../lib/outbox';
 import { useAuth } from '../../stores/useAuth';
 
 // Shorthand for untyped supabase data rows
@@ -119,17 +122,7 @@ export function useStartSession() {
         updated_at: nowIso(),
       };
 
-      // Queue all three rows together (outbox — idempotent upsert)
-      await enqueue('sessions', 'upsert', session as Record<string, unknown>);
-      await enqueue('session_segments', 'upsert', segment as Record<string, unknown>);
-      await enqueue('devices', 'update', {
-        id: input.deviceId,
-        tenant_id: input.tenantId,
-        status: 'busy',
-        updated_at: nowIso(),
-      });
-
-      // Optimistic: execute directly (may fail — outbox will retry)
+      // Direct idempotent writes (Phase 3). Outbox deferred to Phase 8.
       const { error: sessionErr } = await supabase
         .from('sessions')
         .upsert(session, { onConflict: 'id' });
@@ -188,25 +181,7 @@ export function useCloseSession() {
         created_at: now,
       };
 
-      // Queue idempotent writes
-      await enqueue('sessions', 'update', {
-        id: input.sessionId,
-        tenant_id: input.tenantId,
-        status: 'closed',
-        ended_at: input.endedAt,
-        time_total: grandTotal,
-        grand_total: grandTotal,
-        updated_at: now,
-      });
-      await enqueue('audit_log', 'upsert', auditRow as Record<string, unknown>);
-      await enqueue('devices', 'update', {
-        id: input.deviceId,
-        tenant_id: input.tenantId,
-        status: 'free',
-        updated_at: now,
-      });
-
-      // Execute optimistically
+      // Direct idempotent writes (Phase 3). Outbox deferred to Phase 8.
       const { error: closeErr } = await supabase
         .from('sessions')
         .update({
@@ -220,9 +195,10 @@ export function useCloseSession() {
         .eq('tenant_id', input.tenantId);
       if (closeErr) throw closeErr;
 
+      // SHOULD-FIX: upsert (not insert) — idempotent on replay (onConflict:'id')
       await supabase
         .from('audit_log')
-        .insert(auditRow);
+        .upsert(auditRow, { onConflict: 'id' });
 
       await supabase
         .from('devices')

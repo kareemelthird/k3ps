@@ -7,9 +7,10 @@
  * Numeric columns are end-aligned + tabular (design-system §6).
  */
 import { useTranslations } from 'next-intl';
-import { formatEgp, toArabicDigits } from '@ps/core';
+import { formatEgp, toArabicDigits, localHm } from '@ps/core';
 import type { Session } from '@ps/core';
 import { StatusPill } from '@/components/ui/StatusPill';
+import { LiveCost } from '@/components/ui/LiveCost';
 import { LiveTimer } from '@/components/ui/LiveTimer';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
@@ -17,6 +18,8 @@ import { TableRowSkeleton } from '@/components/ui/Skeleton';
 
 interface SessionRow extends Session {
   device_name?: string;
+  /** Rate snapshot from the first segment — required for live cost of active sessions. */
+  price_per_hour_snapshot?: number | null;
 }
 
 interface SessionsTableProps {
@@ -27,11 +30,8 @@ interface SessionsTableProps {
 }
 
 function formatStartedAt(iso: string): string {
-  // Format as HH:MM in Cairo timezone using Arabic-Indic digits
-  const date = new Date(iso);
-  const hours = date.getUTCHours().toString().padStart(2, '0');
-  const minutes = date.getUTCMinutes().toString().padStart(2, '0');
-  return toArabicDigits(`${hours}:${minutes}`);
+  // Format as HH:MM in Africa/Cairo timezone using Arabic-Indic digits
+  return toArabicDigits(localHm(iso));
 }
 
 export function SessionsTable({
@@ -141,7 +141,16 @@ export function SessionsTable({
                       />
                     </td>
                     <td className="px-md py-sm text-end tabular-nums text-primary font-medium">
-                      {formatEgp(session.grand_total)}
+                      {session.status === 'active' &&
+                      session.price_per_hour_snapshot != null ? (
+                        <LiveCost
+                          startedAt={session.started_at}
+                          ratePerHourPiastres={session.price_per_hour_snapshot}
+                          tickMs={15000}
+                        />
+                      ) : (
+                        formatEgp(session.grand_total)
+                      )}
                     </td>
                   </tr>
                 ))}

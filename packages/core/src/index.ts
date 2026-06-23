@@ -9,8 +9,10 @@
  *   - types      shared multi-tenant domain types (Tenant, Branch, TenantMember,
  *                operational entities with tenant_id / branch_id)
  *
- * Phase 4 (Devices + Sessions + Pricing) will add pricing/ here, consuming the
- * money/time primitives above with no API churn.
+ * Phase 3 adds the open-meter cost helper under pricing/ so the counters bill
+ * through @ps/core (integer piastres) instead of inline floats. Phase 4 will
+ * extend pricing/ with rate-rule resolution + the multi-segment session engine,
+ * consuming the money/time primitives above with no API churn.
  *
  * HARD RULES (CLAUDE.md §2, §4):
  *   - NO imports from React, React Native, Expo, Next.js, or Supabase.
@@ -24,4 +26,5 @@ export * from './money';
 export * from './time';
 export * from './id';
 export * from './inventory';
+export * from './pricing';
 export * from './types';

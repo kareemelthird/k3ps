@@ -27,6 +27,7 @@ module.exports = {
     'src/money/money.ts',
     'src/time/time.ts',
     'src/inventory/stock.ts',
+    'src/pricing/open-meter.ts',
     'src/id/id.ts',
     '!src/**/*.test.ts',
     '!src/**/__tests__/**',

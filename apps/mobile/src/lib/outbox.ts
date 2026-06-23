@@ -1,8 +1,12 @@
 /**
- * Offline outbox — idempotent client-UUID + upsert writes that survive app
- * crashes and network loss. (mobile-patterns.md, offline-outbox-guard)
+ * Offline outbox — RESERVED FOR PHASE 8. Not called in Phase 3.
  *
- * Invariants:
+ * Idempotent client-UUID + upsert writes that survive app crashes and network
+ * loss. (mobile-patterns.md, offline-outbox-guard). Phase 3 uses direct writes
+ * only; enqueue/flush will be wired back in Phase 8 with full retry/dead-letter
+ * UI and network-watcher flushing.
+ *
+ * Invariants (when active):
  * 1. Client-generated id + upsert — replays are idempotent.
  * 2. stamp updated_at before queueing (last-write-wins).
  * 3. Dead-letter after MAX_ATTEMPTS — queue keeps draining.

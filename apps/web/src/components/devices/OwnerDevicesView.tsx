@@ -24,6 +24,12 @@ interface OwnerDevicesViewProps {
 
 interface SessionWithDevice extends Session {
   device_name?: string;
+  /**
+   * Price-per-hour snapshot from the first session segment (integer piastres).
+   * Populated by the Supabase join; null when no segment exists yet.
+   * Used by LiveCost to compute the running cost via @ps/core (no inline math).
+   */
+  price_per_hour_snapshot?: number | null;
 }
 
 export function OwnerDevicesView({ branchId, tenantId }: OwnerDevicesViewProps) {
@@ -66,9 +72,15 @@ export function OwnerDevicesView({ branchId, tenantId }: OwnerDevicesViewProps) 
       const supabase = getBrowserClient();
       // Fetch current (active) + recent (closed, last 50) sessions for this branch.
       // RLS ensures tenant isolation — the signed JWT claim gates which rows are visible.
+      // We join devices(name) for display and session_segments(price_per_hour_snapshot)
+      // (first segment, ascending order) so LiveCost can compute the running cost via
+      // @ps/core without inline float math. Only the first segment is needed: it carries
+      // the rate at session open; Phase 4 will add multi-segment cost summation.
       const { data, error } = await supabase
         .from('sessions')
-        .select('*, devices(name)')
+        .select(
+          '*, devices(name), session_segments(price_per_hour_snapshot, started_at)',
+        )
         .eq('branch_id', branchId)
         .in('status', ['active', 'closed'])
         .order('started_at', { ascending: false })
@@ -76,11 +88,24 @@ export function OwnerDevicesView({ branchId, tenantId }: OwnerDevicesViewProps) 
 
       if (error) throw error;
 
-      const rows: SessionWithDevice[] = ((data as Array<Session & { devices?: { name: string } | null }>) ?? []).map(
-        (row) => ({
-          ...row,
-          device_name: row.devices?.name,
-        }),
+      type RawSession = Session & {
+        devices?: { name: string } | null;
+        session_segments?: Array<{ price_per_hour_snapshot: number; started_at: string }> | null;
+      };
+
+      const rows: SessionWithDevice[] = ((data as RawSession[]) ?? []).map(
+        (row) => {
+          // Take the earliest segment (lowest started_at) as the rate source.
+          const segments = row.session_segments ?? [];
+          const firstSegment = segments.length > 0
+            ? segments.reduce((a, b) => (a.started_at <= b.started_at ? a : b))
+            : null;
+          return {
+            ...row,
+            device_name: row.devices?.name,
+            price_per_hour_snapshot: firstSegment?.price_per_hour_snapshot ?? null,
+          };
+        },
       );
       setSessions(rows);
     } catch (err) {
