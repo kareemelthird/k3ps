@@ -1,20 +1,27 @@
 /**
  * @ps/core — pure, framework-free domain logic.
  *
- * This package is the home for logic PORTED from the Pochinki trial:
- *   - pricing/      rate-rule resolution + open/prepaid/fixed-match cost (engine, session, segments)
- *   - money         integer piastres (100 = 1 EGP), formatting, Arabic-Indic digits
- *   - time          Africa/Cairo timezone math, weekday/weekend, peak windows
- *   - inventory     stock ledger aggregation (on-hand = sum of deltas), oversell guard
- *   - types         shared domain types (Tenant, Branch, Device, Session, Order, ...)
+ * Phase 2 (Tenant foundation) ships:
+ *   - money      integer piastres (100 = 1 EGP), formatting, Arabic-Indic digits
+ *   - time       Africa/Cairo timezone math, weekday/weekend, peak windows
+ *   - id         client-generated UUID v4 for idempotent / offline-safe writes
+ *   - inventory  stock ledger (on-hand = Σ deltas), oversell signal, valuation
+ *   - types      shared multi-tenant domain types (Tenant, Branch, TenantMember,
+ *                operational entities with tenant_id / branch_id)
  *
- * HARD RULES (see ../../CLAUDE.md):
- *   - NO imports from React, React Native, Expo, Next.js, or Supabase. This package must run in plain Node for tests.
+ * Phase 4 (Devices + Sessions + Pricing) will add pricing/ here, consuming the
+ * money/time primitives above with no API churn.
+ *
+ * HARD RULES (CLAUDE.md §2, §4):
+ *   - NO imports from React, React Native, Expo, Next.js, or Supabase.
  *   - Money is always integer piastres. Never floats.
- *   - Functions are pure: same input -> same output, no I/O, no Date.now() inside cost math (pass timestamps in).
- *
- * Phase 2 (Tenant foundation) ports money/time/inventory/types here.
- * Phase 4 (Devices + Sessions + Pricing) ports the pricing engine here.
+ *   - Pure: same input -> same output, no I/O. Timestamps are passed in as
+ *     arguments; only nowIso() reads the system clock, and it must never be
+ *     called from inside cost-relevant math.
  */
 
-export const CORE_PLACEHOLDER = true;
+export * from './money';
+export * from './time';
+export * from './id';
+export * from './inventory';
+export * from './types';
