@@ -1,8 +1,8 @@
-# Reference: `@ps/core` port targets (from Pochinki trial)
+# Reference: `@ps/core` — sound logic to learn from the trial
 
-The trial's pure logic is proven and tested. **Port and generalize** it into `packages/core/src`; do not import from the trial. Source: `D:\K3\Pochinki\src`. Money is integer **piastres** (100 = 1 EGP) everywhere.
+The Pochinki trial is a **learning input, not a blueprint**. Its money/time/pricing **algorithms and invariants are sound** — reuse them in `packages/core/src`, but write a **fresh, cleaner API**, improve where you can, and **never import from the trial**. Source for lessons only: `D:\K3\Pochinki\src`. Money is integer **piastres** (100 = 1 EGP) everywhere.
 
-> Generalization note: where the trial hardcodes `Africa/Cairo` / EGP, keep that behavior for now (Phase 1 decision) but isolate it behind a constant so multi-currency/timezone can be added later without touching call sites.
+> Localization note: treat `Africa/Cairo` / EGP as the current default behind named constants, so multi-currency/timezone can be added later without touching call sites.
 
 ## money (port from `src/lib/money.ts`)
 ```ts

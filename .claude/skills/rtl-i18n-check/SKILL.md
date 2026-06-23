@@ -6,7 +6,7 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # rtl-i18n-check
 
-The product is Arabic-first and RTL. UI that hardcodes English or doesn't mirror is a defect. Reference: `docs/reference/mobile-patterns.md` (i18n/RTL) and `design-system.md`.
+The product is Arabic-first and RTL. UI that hardcodes English or doesn't mirror is a defect. Reference: `docs/reference/mobile-patterns.md` (i18n/RTL) and the ux-designer's generated `docs/design/design-system.md`.
 
 ## Checks
 1. **No hardcoded user-facing strings.** Every visible string comes from i18n (`t('...')`). Sweep changed UI files for JSX/`<Text>`/`<AppText>` string literals that aren't keys, icon names, or testIDs:

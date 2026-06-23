@@ -6,7 +6,9 @@ The shared knowledge base for everyone working in this repo, **human and agent**
 
 ## 1. What we are building
 
-A **multi-tenant SaaS for gaming cafés** (PlayStation lounges). One platform, many independent café businesses. Reuses the proven core of the earlier single-café trial (`Pochinki`) and adds tenancy, a branch layer, web surfaces, and a super-admin.
+A **multi-tenant SaaS for gaming cafés** (PlayStation lounges). One platform, many independent café businesses, with tenancy, a branch layer, web surfaces, and a super-admin.
+
+> The earlier single-café app (`Pochinki`) is a **trial — a learning input, not a blueprint.** We learn from it and reuse genuinely sound ideas (the money model, the pricing math, the offline-outbox concept), but we build PS-Managment **fresh, more advanced, and better**. We never copy its UI/design and never import its code.
 
 **Tenancy hierarchy:**
 
@@ -37,7 +39,7 @@ These caused real bugs in the trial or are core to trust in a cash business. Vio
 
 ---
 
-## 3. The pricing model (ported from Pochinki, kept intact)
+## 3. The pricing model (the café business — rebuilt cleanly, informed by the trial)
 
 Three billing modes, all driven by owner-configured **rate rules** (per device type / play mode / day type / time window / priority):
 
@@ -47,7 +49,7 @@ Three billing modes, all driven by owner-configured **rate rules** (per device t
 
 A session is split into **segments**; switching single↔multi or crossing a peak boundary closes the current segment (freezing its rate snapshot) and opens a new one. `grand_total = Σ segment costs + Σ order items − discount`. Every bill must be reconstructible from stored snapshots.
 
-> The reference implementation is in the trial at `D:\K3\Pochinki\src\pricing\`. We **port and generalize** it into `packages/core/src/pricing`; we do not depend on the trial.
+> The trial at `D:\K3\Pochinki\src\pricing\` is a **learning reference** for these (sound) algorithms and their invariants. Re-derive them in `packages/core/src/pricing` with a fresh, cleaner API and improvements — never import from the trial. See the `learn-from-trial` skill and `docs/reference/core-api.md`.
 
 ---
 
@@ -75,7 +77,8 @@ A session is split into **segments**; switching single↔multi or crossing a pea
 
 - **Monorepo** via npm workspaces: `packages/*`, `apps/*`.
 - **TypeScript strict** everywhere; `noUncheckedIndexedAccess` on in core.
-- **State (mobile):** Zustand (live state) + TanStack Query (server cache). **Offline:** outbox queue (ported, hardened for tenancy).
+- **State (mobile):** Zustand (live state) + TanStack Query (server cache). **Offline:** outbox queue (sound idea reused from the trial, rebuilt for tenancy).
+- **Design:** built fresh with the **`ui-ux-pro-max`** skill + the **21st.dev magic MCP** (`mcp__magic__*`) — not the trial's look. The `ux-designer` owns the design system in `docs/design/`. See `docs/reference/design-approach.md`.
 - **Tests:** Jest (ts-jest) for `@ps/core` and unit logic; integration tests for full-shift flows.
 - **Backend:** Supabase CLI for migrations; RLS in SQL; edge functions for auth hooks/webhooks.
 
@@ -103,7 +106,7 @@ Work flows through a fixed pipeline (see `.claude/workflows/feature.js` and `doc
 Rules for agents:
 
 - **Stay in your lane.** Each agent owns specific paths/skills (see `docs/AGENTS.md`). Don't edit another agent's area without handing off.
-- **Reuse before writing.** Search `packages/core` and existing code first; the trial already solved pricing/money/time/inventory.
+- **Learn, don't replicate.** Search `packages/core` and existing code first to reuse what *we've* built. Treat the Pochinki trial as a learning input (sound ideas worth reusing-and-improving) — never a blueprint to copy and never a dependency (`learn-from-trial` skill).
 - **Cite sources** when you use web research to make a decision; record hard decisions as an ADR.
 - **Findings must be verified.** Reviewer claims are adversarially checked before they become work.
 - **Never auto-approve.** The human (project owner) approves at the end of each phase. Agents prepare a concise gate summary: what was built, test results, residual risks, and any decisions needing a human.
@@ -116,6 +119,6 @@ Rules for agents:
 - Roadmap & phases: `docs/ROADMAP.md`
 - Backlog: `docs/BACKLOG.md`
 - The team (org chart, ownership, handoffs): `docs/AGENTS.md`
-- **Engineering handbook** (distilled from the trial — read before building): `docs/reference/` — `core-api.md`, `schema-and-rls.md`, `mobile-patterns.md`, `design-system.md`
+- **Engineering handbook** (lessons distilled from the trial — read before building): `docs/reference/` — `core-api.md`, `schema-and-rls.md`, `mobile-patterns.md`, `design-approach.md`
 - Architecture decisions: `docs/adr/`
-- Reference trial (read-only, do not modify): `D:\K3\Pochinki`
+- Trial app (read-only, for **lessons only — not a blueprint**, do not modify): `D:\K3\Pochinki`

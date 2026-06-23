@@ -8,11 +8,11 @@ This project is built by a team of specialized agents, run like a software compa
 | --- | --- | --- | --- |
 | `product-manager` | Specs & backlog | `docs/specs`, `docs/BACKLOG.md` | deep-research |
 | `architect` | System/DB design, **tenant isolation**, ADRs | `docs/adr`, `docs/design` | adr-write, deep-research, MS-Learn |
-| `ux-designer` | RTL UX, design system, component contracts | `docs/design` | ui-ux-pro-max, magic MCP |
-| `core-engineer` | Pure logic: pricing/money/time/inventory | `packages/core` | port-from-pochinki, pricing-engine-guard, ps-verify |
-| `backend-engineer` | Schema, migrations, RLS, edge funcs | `supabase/` | port-from-pochinki, supabase-migrate, rls-tenant-audit, ps-verify |
-| `mobile-engineer` | Expo counter/manager app | `apps/mobile` | port-from-pochinki, offline-outbox-guard, rtl-i18n-check, ps-verify |
-| `web-engineer` | Owner dashboard + super-admin | `apps/web` | rtl-i18n-check, ps-verify |
+| `ux-designer` | Fresh RTL design system, component contracts | `docs/design` | ui-ux-pro-max, magic MCP (21st.dev) |
+| `core-engineer` | Pure logic: pricing/money/time/inventory | `packages/core` | learn-from-trial, pricing-engine-guard, ps-verify |
+| `backend-engineer` | Schema, migrations, RLS, edge funcs | `supabase/` | learn-from-trial, supabase-migrate, rls-tenant-audit, ps-verify |
+| `mobile-engineer` | Expo counter/manager app | `apps/mobile` | ui-ux-pro-max, learn-from-trial, offline-outbox-guard, rtl-i18n-check, ps-verify |
+| `web-engineer` | Owner dashboard + super-admin | `apps/web` | ui-ux-pro-max, rtl-i18n-check, ps-verify |
 | `qa-tester` | Tests, verification, acceptance gating | tests across repo | ps-verify, pricing-engine-guard, rls-tenant-audit, offline-outbox-guard, verify |
 | `code-reviewer` | Correctness + cleanliness (read-only) | review findings | code-review, simplify |
 | `security-reviewer` | Auth/RLS/isolation audit (read-only) | security sign-off | security-review, rls-tenant-audit |
@@ -23,11 +23,11 @@ The **orchestrator** is the main Claude Code session driving the workflows below
 
 ## Engineering handbook (`docs/reference/`)
 
-The team's shared, code-grounded knowledge — distilled from the trial so agents don't rediscover it. Agents read the relevant file before building:
-- `core-api.md` — exact `@ps/core` port targets (signatures, invariants).
-- `schema-and-rls.md` — trial schema/RLS + the multi-tenant deltas.
-- `mobile-patterns.md` — outbox, stores, query layer, timers, kit, i18n, navigation.
-- `design-system.md` — exact tokens (hex/type/spacing) + established flows.
+The team's shared, code-grounded knowledge — **lessons distilled from the trial** (a learning input, not a blueprint) so agents reuse sound ideas and improve, rather than rediscover or copy. Agents read the relevant file before building:
+- `core-api.md` — sound `@ps/core` algorithms + invariants to reuse with a fresh API.
+- `schema-and-rls.md` — the entity model lesson + the multi-tenant deltas.
+- `mobile-patterns.md` — outbox/timers/query/i18n/navigation ideas worth reusing-and-improving.
+- `design-approach.md` — design is built **fresh** with `ui-ux-pro-max` + 21st.dev magic MCP; trial visuals are not a style guide.
 
 ## The workflow (per feature / phase)
 
@@ -49,7 +49,7 @@ Supporting workflows:
 - `bugfix.js` — reproduce → adversarially confirm root cause → fix (isolated) → QA re-verify.
 
 ## Rules of engagement
-- **Reuse first** — the Pochinki trial already solved pricing/money/time/inventory; port, don't reinvent.
+- **Learn, don't replicate** — the Pochinki trial is a learning input; reuse sound ideas and improve, never copy its UI or import its code (`learn-from-trial`). Design is built fresh with the tooling.
 - **Stay in your lane** — own your paths; hand off across boundaries.
 - **Findings get verified** — no unverified claim becomes work.
 - **Tenant isolation is sacred** — every RLS change needs `security-reviewer` sign-off.

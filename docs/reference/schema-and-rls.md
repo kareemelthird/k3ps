@@ -1,6 +1,6 @@
-# Reference: schema & RLS — trial baseline + multi-tenant deltas
+# Reference: schema & RLS — lessons from the trial + multi-tenant deltas
 
-The trial schema (`D:\K3\Pochinki\supabase\migrations\0001..0011`) is **single-café**: no `tenant_id`, no `branch_id`. This doc captures what exists and exactly what must change for multi-tenancy. The isolation model is decided by the Phase-2 ADR; this doc is input to it, not the decision.
+The trial schema (`D:\K3\Pochinki\supabase\migrations`) is **single-café** (no `tenant_id`/`branch_id`) — a **learning input, not a blueprint**. Reuse its *sound entity model* (devices/sessions/segments/orders/shifts/…); design the multi-tenant schema **fresh and improved**, don't transcribe it. The isolation model is decided by the Phase-2 ADR; this doc is input to it, not the decision.
 
 ## Trial tables (column shape to reuse)
 - **profiles** `id`(=auth.users.id) · `role` enum(owner|manager) · `full_name` · `phone?` · `is_active` · `permissions` jsonb · timestamps.

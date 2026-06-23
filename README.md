@@ -1,6 +1,6 @@
 # PS-Managment
 
-Multi-tenant SaaS for managing **gaming cafés** (PlayStation lounges). A single platform serving many independent café businesses — each with its own branches, devices, staff, pricing, shifts, and reports — built as a monorepo that reuses the proven core logic from the earlier single-café app (`Pochinki`).
+Multi-tenant SaaS for managing **gaming cafés** (PlayStation lounges). A single platform serving many independent café businesses — each with its own branches, devices, staff, pricing, shifts, and reports — built as a monorepo. The earlier single-café app (`Pochinki`) is a **trial we learn from, not a blueprint**: we reuse genuinely sound ideas (money model, pricing math, offline sync) and build this one fresh, more advanced, and better.
 
 ## What this is
 

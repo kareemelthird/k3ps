@@ -1,6 +1,6 @@
-# Reference: mobile architecture patterns (from Pochinki trial)
+# Reference: mobile architecture lessons (from the trial)
 
-Proven RN/Expo patterns to port into `apps/mobile`. Source: `D:\K3\Pochinki\src`. Harden every write path for tenancy (carry `tenant_id`/`branch_id`).
+RN/Expo patterns the trial got right — a **learning input, not a blueprint**. Reuse the *sound ideas* (offline outbox concept, timestamp-derived timers, query conventions) and **build cleaner**; don't transcribe the trial. Design/UI is fresh via the `ui-ux-pro-max` skill + magic MCP (see `design-approach.md`). Harden every write path for tenancy (carry `tenant_id`/`branch_id`).
 
 ## Offline outbox (port from `src/features/sync/`)
 Public API (`outbox.ts`): `enqueue(entry)`, `flushOutbox(): {flushed,remaining,dead}`, `pendingCount()`, `getPending()`, `getDeadLetter()`, `retryDeadLetter()`, `discardDeadLetter(localId?)`. Helper `mutate.ts`: `persistRow({table, op, row})` — queue + fire-and-forget flush.
