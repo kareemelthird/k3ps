@@ -39,3 +39,18 @@ jobs:
       - name: Stop Supabase
         if: always()
         run: supabase stop
+
+  app-builds:
+    name: "App builds — next build + expo export"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Web production build (apps/web)
+        run: npm --workspace apps/web run build
+      - name: Mobile web bundle (apps/mobile, expo export)
+        run: npm --workspace apps/mobile run export -- --platform web
