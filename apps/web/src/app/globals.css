@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Calm Operations — semantic color tokens (design-system §2.2)
+ * Dark-first: the dark theme is the default for the operator app.
+ * Variables are consumed by the Tailwind semantic color classes.
+ */
+:root {
+  /* Default = dark (operator/owner default per design-system §1) */
+  --color-bg: #080C13;
+  --color-surface: #0D131D;
+  --color-surface-2: #131A26;
+  --color-surface-3: #1E293B;
+  --color-border: #22304A;
+  --color-border-strong: #33476B;
+  --color-text: #EEF2F6;
+  --color-text-muted: #94A3B8;
+  --color-text-faint: #64748B;
+  --color-primary: #14B8A6;
+  --color-primary-press: #0D9488;
+  --color-on-primary: #080C13;
+}
+
+/* Light theme override */
+.light {
+  --color-bg: #F8FAFC;
+  --color-surface: #FFFFFF;
+  --color-surface-2: #EEF2F6;
+  --color-surface-3: #E2E8F0;
+  --color-border: #CBD5E1;
+  --color-border-strong: #94A3B8;
+  --color-text: #0D131D;
+  --color-text-muted: #475569;
+  --color-text-faint: #64748B;
+  --color-primary: #0D9488;
+  --color-primary-press: #0F766E;
+  --color-on-primary: #FFFFFF;
+}
+
+/* Arabic-first font loading */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap');
+
+/* Global base: RTL body, 16px floor */
+body {
+  @apply bg-bg text-text text-body antialiased;
+  font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', system-ui, sans-serif;
+}
+
+/* Logical properties: ensure start/end map correctly in RTL */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* Focus ring: visible 2–4px primary (design-system §7) */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Remove focus ring for mouse users only */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Tabular numerals for money/timers */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reduced motion: disable animations globally */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
