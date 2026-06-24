@@ -94,6 +94,12 @@ export interface StartSessionInput {
   prepaidMinutes?: number | null;
   /** For fixed_match: initial match count (normally 0). */
   matchCount?: number;
+  /**
+   * Phase 5: The open shift id to stamp on the session. null if no shift open.
+   * Allows the close-shift path to attribute this session's grand_total to the
+   * correct drawer (Decision 3 / ADR-0006).
+   */
+  shiftId?: string | null;
 }
 
 export function useStartSession() {
@@ -126,6 +132,9 @@ export function useStartSession() {
         match_count: input.billingMode === 'fixed_match'
           ? (input.matchCount ?? 0)
           : null,
+        // Phase 5: stamp the current open shift_id so the close-shift path can
+        // attribute this session's cash sales to the drawer.
+        shift_id: input.shiftId ?? null,
         time_total: 0,
         orders_total: 0,
         grand_total: 0,

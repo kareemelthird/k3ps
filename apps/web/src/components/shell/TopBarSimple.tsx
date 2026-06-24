@@ -32,6 +32,7 @@ export function TopBarSimple({
   const navItems = [
     { href: '/dashboard', label: t('nav.devices') },
     { href: '/dashboard/rate-rules', label: t('nav.rateRules') },
+    { href: '/dashboard/products', label: t('nav.products') },
   ];
 
   return (

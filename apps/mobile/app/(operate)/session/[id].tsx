@@ -58,6 +58,7 @@ import {
   type SessionRow,
 } from '../../../src/features/session/api';
 import { useAuth } from '../../../src/stores/useAuth';
+import { useOpenShift } from '../../../src/features/shifts/api';
 import { supabase } from '../../../src/lib/supabase';
 import { colors, spacing, radius, fontSize, fontWeight, TAP_TARGET } from '../../../src/design/tokens';
 import { AppText } from '../../../src/components/AppText';
@@ -242,6 +243,8 @@ export default function SessionDetailScreen() {
   const [closing, setClosing] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [closedAt, setClosedAt] = useState<string | null>(null);
+  // Phase 5: capture payment_method at close for drawer attribution.
+  const [closePayMethod, setClosePayMethod] = useState<'cash' | 'wallet' | 'other'>('cash');
 
   const tenantId = claim?.tenant_id ?? null;
 
@@ -343,6 +346,10 @@ export default function SessionDetailScreen() {
   const openSegment = segments.find((s) => s.ended_at === null) ?? null;
   const currentPlayMode: PlayMode = openSegment?.play_mode ?? 'single';
 
+  // Phase 5: fetch the open shift so we can stamp shift_id + payment_method at close.
+  const sessionBranchId = sessionData?.session.branch_id ?? null;
+  const { data: openShiftData } = useOpenShift(tenantId, sessionBranchId);
+
   // ── Mutations ─────────────────────────────────────────────────────────────
 
   const { mutateAsync: switchPlayMode } = useSwitchPlayMode();
@@ -392,6 +399,9 @@ export default function SessionDetailScreen() {
         segments,
         rateRules,
         deviceType,
+        // Phase 5: stamp payment_method and shift_id at close (ADR-0006 Decision 3).
+        paymentMethod: closePayMethod,
+        shiftId: openShiftData?.id ?? null,
       });
       setClosedAt(endedAt);
       setConfirmCloseVisible(false);

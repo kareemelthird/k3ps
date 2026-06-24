@@ -34,6 +34,7 @@ import type { Device, Session } from '@ps/core';
 
 import { useDevices, useActiveSessions, useStartSession } from '../../src/features/devices/api';
 import { useBranches, fetchAndResolveRule } from '../../src/features/auth/api';
+import { useOpenShift } from '../../src/features/shifts/api';
 import { useAuth } from '../../src/stores/useAuth';
 import { colors, spacing, radius, TAP_TARGET, fontSize } from '../../src/design/tokens';
 import { AppText } from '../../src/components/AppText';
@@ -67,6 +68,7 @@ export default function DevicesScreen() {
 
   const { mutateAsync: startSession } = useStartSession();
   const { data: branches } = useBranches(tenantId);
+  const { data: openShift } = useOpenShift(tenantId, branchId);
 
   // ── Start session sheet state ─────────────────────────────────────────────
 
@@ -166,6 +168,9 @@ export default function DevicesScreen() {
         prepaidTotal: billingMode === 'prepaid' ? prepaidTotal : undefined,
         prepaidMinutes: billingMode === 'prepaid' ? prepaidMinutesNum : undefined,
         matchCount: billingMode === 'fixed_match' ? 0 : undefined,
+        // Phase 5: stamp the current open shift_id so the close-shift drawer
+        // can attribute this session's cash sales correctly (ADR-0006 Decision 3).
+        shiftId: openShift?.id ?? null,
       });
 
       setSelectedDevice(null);

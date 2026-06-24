@@ -28,6 +28,7 @@ import {
   computeFixedMatchCost,
   computeGrandTotal,
   computePrepaidCost,
+  isTracked,
   nowIso,
   planSegments,
   PS_UUID_NS,
@@ -332,6 +333,16 @@ export interface CloseSessionPhase4Input {
   rateRules: RateRule[];
   /** Device type for planSegments rule resolution. */
   deviceType: string;
+  /**
+   * Phase 5: Payment method captured at close (cash/wallet/other).
+   * Used to attribute cash sales to the shift drawer.
+   */
+  paymentMethod?: 'cash' | 'wallet' | 'other';
+  /**
+   * Phase 5: Open shift id to stamp on the session row at close.
+   * null if no shift is open.
+   */
+  shiftId?: string | null;
 }
 
 /**
@@ -461,6 +472,7 @@ export function useCloseSessionPhase4() {
       }
 
       // Update session row.
+      // Phase 5: also stamp payment_method and shift_id at close.
       const { error: sessionErr } = await supabase
         .from('sessions')
         .update({
@@ -468,11 +480,83 @@ export function useCloseSessionPhase4() {
           ended_at: endedAt,
           time_total: timeTotalPiastres,
           grand_total: grandTotal,
+          payment_method: input.paymentMethod ?? null,
+          shift_id: input.shiftId ?? null,
           updated_at: now,
         })
         .eq('id', input.sessionId)
         .eq('tenant_id', input.tenantId);
       if (sessionErr) throw sessionErr;
+
+      // Phase 5: Write stock sale movements for session-attached tracked items
+      // (Decision 4: decrement at session close, not at add-time).
+      // Fetch all non-void orders + items for this session, then write
+      // one stock_movements row per tracked non-void line.
+      // Idempotent: movement id = uuidv5(`stock-sale:{itemId}`, PS_UUID_NS).
+      const { data: sessionOrders } = await supabase
+        .from('orders')
+        .select('id, status, order_items(id, product_id, qty, is_void)')
+        .eq('session_id', input.sessionId)
+        .eq('tenant_id', input.tenantId)
+        .neq('status', 'void');
+
+      if (sessionOrders && sessionOrders.length > 0) {
+        // Collect product ids to check if tracked.
+        const productIds = new Set<string>();
+        for (const order of sessionOrders) {
+          for (const item of (order.order_items ?? [])) {
+            if (!item.is_void) productIds.add(item.product_id);
+          }
+        }
+
+        if (productIds.size > 0) {
+          // Fetch product stock flags.
+          const { data: productRows } = await supabase
+            .from('products')
+            .select('id, stock')
+            .in('id', Array.from(productIds))
+            .eq('tenant_id', input.tenantId);
+
+          const productStockMap = new Map<string, number | null>();
+          for (const p of (productRows ?? [])) {
+            productStockMap.set(p.id, p.stock);
+          }
+
+          // Build sale movement rows for tracked lines.
+          const movementRows: {
+            id: string; tenant_id: string; branch_id: string;
+            product_id: string; delta: number; reason: 'sale';
+            order_id: string; manager_id: string; note: null; created_at: string;
+          }[] = [];
+
+          for (const order of sessionOrders) {
+            for (const item of (order.order_items ?? [])) {
+              if (item.is_void) continue;
+              const stockFlag = productStockMap.get(item.product_id) ?? null;
+              if (!isTracked({ stock: stockFlag })) continue;
+              movementRows.push({
+                id: uuidv5(`stock-sale:${item.id}`, PS_UUID_NS),
+                tenant_id: input.tenantId,
+                branch_id: input.branchId,
+                product_id: item.product_id,
+                delta: -item.qty,
+                reason: 'sale',
+                order_id: order.id,
+                manager_id: input.managerId,
+                note: null,
+                created_at: now,
+              });
+            }
+          }
+
+          if (movementRows.length > 0) {
+            const { error: mvErr } = await supabase
+              .from('stock_movements')
+              .upsert(movementRows, { onConflict: 'id' });
+            if (mvErr) throw mvErr;
+          }
+        }
+      }
 
       // Free the device.
       const { error: deviceErr } = await supabase
