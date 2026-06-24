@@ -21,7 +21,8 @@ import { useTranslations } from 'next-intl';
 import {
   formatEgp,
   toArabicDigits,
-  uuidv4,
+  uuidv5,
+  PS_UUID_NS,
 } from '@ps/core';
 import type { RateRule, BillingMode } from '@ps/core';
 import { Button } from '@/components/ui/Button';
@@ -30,6 +31,7 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import { RateRuleForm } from './RateRuleForm';
 import { RateRulePreview } from './RateRulePreview';
 import { getBrowserClient } from '@/lib/supabase/client';
+import { useAuth } from '@/lib/auth/AuthContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,6 +90,7 @@ function rulePrice(rule: RateRule, t: ReturnType<typeof useTranslations>): strin
 
 export function RateRulesView({ isOwner }: RateRulesViewProps) {
   const t = useTranslations();
+  const { claim, user } = useAuth();
   const [rules, setRules] = useState<RateRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -137,6 +140,10 @@ export function RateRulesView({ isOwner }: RateRulesViewProps) {
     setPendingId(rule.id);
     try {
       const supabase = getBrowserClient();
+      const tenantId = claim?.tenant_id;
+      const actorId = user?.id;
+      if (!tenantId || !actorId) throw new Error('Not authenticated');
+
       const now = new Date().toISOString();
       const { error: err } = await supabase
         .from('rate_rules')
@@ -144,16 +151,24 @@ export function RateRulesView({ isOwner }: RateRulesViewProps) {
         .eq('id', rule.id);
       if (err) throw err;
 
-      // Audit write (ADR-0005 Decision 5, taxonomy: rate_rule.deactivate)
-      await supabase.from('audit_log').insert({
-        id: uuidv4(),
-        action: 'rate_rule.deactivate',
-        entity: 'rate_rule',
-        entity_id: rule.id,
-        amount: null,
-        meta: { before: { is_active: true }, after: { is_active: false } },
-        created_at: now,
-      });
+      // Audit write — idempotent upsert with a deterministic id (ADR-0005
+      // Decision 5, CLAUDE.md §2.8); error surfaced, not swallowed (§2.7).
+      // tenant_id and actor_id are required NOT NULL columns (0002 migration).
+      const { error: auditErr } = await supabase.from('audit_log').upsert(
+        {
+          id: uuidv5(`rate_rule.deactivate:${rule.id}:${now}`, PS_UUID_NS),
+          tenant_id: tenantId,
+          actor_id: actorId,
+          action: 'rate_rule.deactivate',
+          entity: 'rate_rule',
+          entity_id: rule.id,
+          amount: null,
+          meta: { before: { is_active: true }, after: { is_active: false } },
+          created_at: now,
+        },
+        { onConflict: 'id' },
+      );
+      if (auditErr) throw auditErr;
 
       setRules((prev) =>
         prev.map((r) => (r.id === rule.id ? { ...r, is_active: false } : r)),
@@ -171,6 +186,10 @@ export function RateRulesView({ isOwner }: RateRulesViewProps) {
     setPendingId(rule.id);
     try {
       const supabase = getBrowserClient();
+      const tenantId = claim?.tenant_id;
+      const actorId = user?.id;
+      if (!tenantId || !actorId) throw new Error('Not authenticated');
+
       const now = new Date().toISOString();
       const { error: err } = await supabase
         .from('rate_rules')
@@ -178,16 +197,24 @@ export function RateRulesView({ isOwner }: RateRulesViewProps) {
         .eq('id', rule.id);
       if (err) throw err;
 
-      // Audit write (ADR-0005 Decision 5, taxonomy: rate_rule.reactivate)
-      await supabase.from('audit_log').insert({
-        id: uuidv4(),
-        action: 'rate_rule.reactivate',
-        entity: 'rate_rule',
-        entity_id: rule.id,
-        amount: null,
-        meta: { before: { is_active: false }, after: { is_active: true } },
-        created_at: now,
-      });
+      // Audit write — idempotent upsert with a deterministic id (ADR-0005
+      // Decision 5, CLAUDE.md §2.8); error surfaced, not swallowed (§2.7).
+      // tenant_id and actor_id are required NOT NULL columns (0002 migration).
+      const { error: auditErr } = await supabase.from('audit_log').upsert(
+        {
+          id: uuidv5(`rate_rule.reactivate:${rule.id}:${now}`, PS_UUID_NS),
+          tenant_id: tenantId,
+          actor_id: actorId,
+          action: 'rate_rule.reactivate',
+          entity: 'rate_rule',
+          entity_id: rule.id,
+          amount: null,
+          meta: { before: { is_active: false }, after: { is_active: true } },
+          created_at: now,
+        },
+        { onConflict: 'id' },
+      );
+      if (auditErr) throw auditErr;
 
       setRules((prev) =>
         prev.map((r) => (r.id === rule.id ? { ...r, is_active: true } : r)),

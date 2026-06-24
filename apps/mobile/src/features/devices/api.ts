@@ -10,7 +10,7 @@
  * direct (idempotent upsert with onConflict:'id').
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { nowIso, uuidv4 } from '@ps/core';
+import { nowIso, PS_UUID_NS, uuidv4, uuidv5 } from '@ps/core';
 import type { BillingMode, Device, PlayMode, Session } from '@ps/core';
 
 import { supabase } from '../../lib/supabase';
@@ -200,8 +200,10 @@ export function useCloseSession() {
       const grandTotal = Math.max(0, input.timeTotalPiastres);
       const now = nowIso();
 
+      // Deterministic audit id: 'close:{sessionId}' → same id on retry →
+      // upsert updates-in-place; no second audit row (BLOCKER 3 / CLAUDE.md §2.8).
       const auditRow: AnyRow = {
-        id: uuidv4(),
+        id: uuidv5(`close:${input.sessionId}`, PS_UUID_NS),
         tenant_id: input.tenantId,
         branch_id: input.branchId,
         actor_id: input.managerId,

@@ -30,8 +30,10 @@ import {
   computePrepaidCost,
   nowIso,
   planSegments,
+  PS_UUID_NS,
   resolveRule,
   uuidv4,
+  uuidv5,
   type BillingMode,
   type OpenMeterModifiers,
   type PlayMode,
@@ -159,74 +161,10 @@ function modifiersFromFirstSegment(
  * using planSegments over the single open segment + all closed segments.
  * This is the ADR-0005 preview-splits pattern: no DB write happens here.
  *
- * Called every tick; input is the current instant (passed in — never reads
- * clock inside this helper). Returns { timeCost, grandTotal, segmentPlans }.
- */
-export function computeLiveOpenMeter(
-  session: SessionRow,
-  segments: SegmentRow[],
-  rateRules: RateRule[],
-  atIso: string,
-): { timeCost: number; grandTotal: number; segmentPlans: SegmentPlan[] } {
-  const closedSegs = segments.filter((s) => s.ended_at !== null);
-  const openSeg = segments.find((s) => s.ended_at === null);
-
-  const mods = modifiersFromFirstSegment(segments, rateRules);
-
-  // Closed segments contribute their pre-computed snapshot costs.
-  const closedInputs = closedSegs.map((s) => ({
-    price_per_hour: s.price_per_hour_snapshot,
-    started_at: s.started_at,
-    ended_at: s.ended_at as string,
-  }));
-
-  let allSegmentPlans: SegmentPlan[] = [];
-  let openInputs: { price_per_hour: number; started_at: string; ended_at: string }[] = [];
-
-  if (openSeg) {
-    // Preview-splits: planSegments splits [openSeg.started_at, atIso) at all
-    // rule boundaries derived from the rule set (ADR-0005 Decision 1).
-    const ctx = {
-      device_type: session.device_id, // used only for resolution ctx — the actual type
-      // is embedded in the resolved rule. For live preview we use all rules; if the
-      // session device_type is needed we'd need to fetch the device. Using device_id
-      // here is wrong — we need the device_type. Fetch it from the device query in
-      // the screen; here we receive it as part of the extended session (or fall back
-      // to segment-only approach when device_type is unavailable).
-      // NOTE: the screen passes deviceType explicitly via computeLiveOpenMeterWithType.
-      play_mode: (openSeg.play_mode ?? 'single') as PlayMode,
-      billing_mode: 'open' as BillingMode,
-    };
-
-    allSegmentPlans = planSegments(
-      rateRules,
-      ctx,
-      openSeg.started_at,
-      atIso,
-    );
-
-    openInputs = allSegmentPlans.map((p) => ({
-      price_per_hour: p.price_per_hour_snapshot,
-      started_at: p.started_at,
-      ended_at: p.ended_at,
-    }));
-  }
-
-  const allInputs = [...closedInputs, ...openInputs];
-  const { total: timeCost } = aggregateOpenMeter(allInputs, mods);
-  const grandTotal = computeGrandTotal({
-    time_total: timeCost,
-    orders_total: session.orders_total ?? 0,
-    discount: session.discount ?? 0,
-  });
-
-  return { timeCost, grandTotal, segmentPlans: allSegmentPlans };
-}
-
-/**
- * Like computeLiveOpenMeter but takes an explicit device_type for the
- * planSegments context (so rate-rule resolution is correct). This is the
- * function the session screen calls.
+ * Takes an explicit device_type for the planSegments resolution context (so
+ * rate-rule resolution is correct — never derive it from device_id). Called
+ * every tick; the current instant is passed in (this helper never reads the
+ * clock). Returns { timeCost, grandTotal, segmentPlans }.
  */
 export function computeLiveOpenMeterWithType(
   session: SessionRow,
@@ -318,11 +256,15 @@ export function useSwitchPlayMode() {
         switchedAt,
       );
 
-      // 2. For each plan, create a segment row (client UUID, idempotent upsert).
-      //    The FIRST plan's id re-uses the existing open segment's id so the
-      //    upsert updates it in-place (idempotency: same switch replays same row).
+      // 2. For each plan, create a segment row (deterministic UUID, idempotent upsert).
+      //    The FIRST plan's id re-uses the existing open segment's id (upsert
+      //    updates it in-place). Plans 2..N use uuidv5 keyed by
+      //    '{sessionId}:{plan.started_at}' so a replay always maps to the SAME row
+      //    — no duplicate sub-segments (BLOCKER 3 / CLAUDE.md §2.8).
       const segmentRows = closedPlans.map((plan, idx) => ({
-        id: idx === 0 ? input.openSegment.id : uuidv4(),
+        id: idx === 0
+          ? input.openSegment.id
+          : uuidv5(`seg:${input.sessionId}:${plan.started_at}`, PS_UUID_NS),
         tenant_id: input.tenantId,
         session_id: input.sessionId,
         play_mode: plan.play_mode,
@@ -449,9 +391,14 @@ export function useCloseSessionPhase4() {
           const plans = planSegments(input.rateRules, ctx, openSeg.started_at, endedAt);
 
           // Materialize: first plan reuses the existing segment id (idempotent).
+          // Plans 2..N use uuidv5 keyed by '{sessionId}:{plan.started_at}' so
+          // a retry always maps the same boundary-split to the same row id —
+          // no duplicate sub-segments on retry (BLOCKER 3 / CLAUDE.md §2.8).
           plans.forEach((plan, idx) => {
             newSegmentRows.push({
-              id: idx === 0 ? openSeg.id : uuidv4(),
+              id: idx === 0
+                ? openSeg.id
+                : uuidv5(`seg:${input.sessionId}:${plan.started_at}`, PS_UUID_NS),
               tenant_id: input.tenantId,
               session_id: input.sessionId,
               play_mode: plan.play_mode,
@@ -476,9 +423,17 @@ export function useCloseSessionPhase4() {
 
       } else if (billingMode === 'prepaid') {
         // ── Prepaid close: use locked prepaid_total (never re-compute from rules) ──
+        // If prepaid_total is non-null (including 0) it is returned exactly.
+        // Legacy fallback (prepaid_total == null): read block_price and blocks
+        // from the first segment's snapshot so the fallback matches the engine
+        // contract (block_price × max(1, blocks)) — not just 0 (SHOULD-FIX 5).
+        const firstSeg = input.segments[0];
+        const resolvedRule = firstSeg?.rate_rule_id
+          ? input.rateRules.find((r) => r.id === firstSeg.rate_rule_id) ?? null
+          : null;
         timeTotalPiastres = computePrepaidCost({
           prepaid_total: input.session.prepaid_total ?? null,
-          block_price: undefined,
+          block_price: resolvedRule?.price_per_hour ?? firstSeg?.price_per_hour_snapshot ?? 0,
           blocks: 1,
         });
 
@@ -527,9 +482,11 @@ export function useCloseSessionPhase4() {
         .eq('tenant_id', input.tenantId);
       if (deviceErr) throw deviceErr;
 
-      // Write audit_log (idempotent upsert keyed by client UUID).
-      // AC 40: exactly one row per close (same client UUID → upsert = no duplicate).
-      const auditId = uuidv4();
+      // Write audit_log (deterministic UUID → idempotent upsert; one close = one row).
+      // uuidv5 key 'close:{sessionId}' is stable: any retry produces the SAME id
+      // and the upsert updates-in-place instead of inserting a second row
+      // (BLOCKER 3 / AC 40 / CLAUDE.md §2.8).
+      const auditId = uuidv5(`close:${input.sessionId}`, PS_UUID_NS);
       const { error: auditErr } = await supabase
         .from('audit_log')
         .upsert(

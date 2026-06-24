@@ -37,6 +37,7 @@ import {
   computeFixedMatchCost,
   computeGrandTotal,
   computePrepaidCost,
+  elapsedMinutes,
   formatEgp,
   localHm,
   nowIso,
@@ -86,12 +87,9 @@ function SegmentCard({ plan, index, isLast }: SegmentCardProps) {
 
   // Cost for this sub-segment only (not aggregated with min-charge — that's session-level).
   // Display here is informational; grand total on the session card is authoritative.
-  const minutes = Math.max(
-    0,
-    Math.round(
-      (new Date(atIso).getTime() - new Date(plan.started_at).getTime()) / 60000,
-    ),
-  );
+  // Use @ps/core elapsedMinutes: clamps negative, reuses the same time math as billing
+  // (NIT 7 — no inline Date.getTime() math in UI).
+  const minutes = Math.round(elapsedMinutes(plan.started_at, atIso));
 
   return (
     <View style={segStyles.row} accessible accessibilityRole="text">
@@ -259,8 +257,16 @@ export default function SessionDetailScreen() {
   const { data: rateRules = [] } = useRateRules(tenantId);
 
   // Fetch the device row so we know device_type for planSegments resolution.
+  // SHOULD-FIX 4: we must NOT coerce a missing device_type to 'any' (a billing
+  // wildcard). Actions that call planSegments/resolveRule are disabled until
+  // deviceData is confirmed loaded. If the device query errors, we surface an
+  // error state rather than silently billing at the wrong rate.
   const deviceId = sessionData?.session.device_id;
-  const { data: deviceData } = useQuery({
+  const {
+    data: deviceData,
+    isLoading: deviceLoading,
+    error: deviceError,
+  } = useQuery({
     queryKey: ['device', deviceId, tenantId],
     enabled: Boolean(deviceId && tenantId),
     staleTime: 300_000,
@@ -278,7 +284,11 @@ export default function SessionDetailScreen() {
 
   const session = sessionData?.session ?? null;
   const segments = sessionData?.segments ?? [];
-  const deviceType = deviceData?.device_type ?? 'any';
+  // deviceType is only set when the device row is confirmed loaded.
+  // Never falls back to 'any' — callers check deviceReady before using it.
+  const deviceType = deviceData?.device_type ?? null;
+  // True when the device row is available and device_type is known.
+  const deviceReady = Boolean(deviceType);
 
   // ── Tick to force re-render (never accumulates money — timer derives from timestamps) ──
   useTick(closedAt ? null : 1000);
@@ -295,13 +305,17 @@ export default function SessionDetailScreen() {
 
   if (session && !isClosed) {
     if (billingMode === 'open') {
-      const { grandTotal, segmentPlans } = computeLiveOpenMeterWithType(
-        session,
-        segments,
-        rateRules,
-        deviceType,
-        atIso,
-      );
+      // Guard: only compute live cost when deviceType is known. If deviceData
+      // is loading or errored we show 0 until it resolves (SHOULD-FIX 4).
+      const { grandTotal, segmentPlans } = deviceType
+        ? computeLiveOpenMeterWithType(
+            session,
+            segments,
+            rateRules,
+            deviceType,
+            atIso,
+          )
+        : { grandTotal: 0, segmentPlans: [] };
       liveTotalPiastres = grandTotal;
       liveSegmentPlans = segmentPlans;
     } else if (billingMode === 'prepaid') {
@@ -335,13 +349,16 @@ export default function SessionDetailScreen() {
   const { mutateAsync: closeSessionPhase4 } = useCloseSessionPhase4();
 
   const handleSwitchRequest = (newMode: PlayMode) => {
-    if (newMode === currentPlayMode || isClosed || billingMode !== 'open') return;
+    // SHOULD-FIX 4: do not allow mode-switch until deviceType is known — planSegments
+    // needs the real device_type for correct rate-rule resolution.
+    if (newMode === currentPlayMode || isClosed || billingMode !== 'open' || !deviceReady) return;
     setPendingPlayMode(newMode);
     setConfirmSwitchVisible(true);
   };
 
   const handleSwitchConfirm = async () => {
-    if (!openSegment || !session || !tenantId || !pendingPlayMode) return;
+    // SHOULD-FIX 4: guard deviceType — never pass a null/wildcard to planSegments.
+    if (!openSegment || !session || !tenantId || !pendingPlayMode || !deviceType) return;
     setSwitching(true);
     try {
       await switchPlayMode({
@@ -360,7 +377,8 @@ export default function SessionDetailScreen() {
   };
 
   const handleCloseConfirm = async () => {
-    if (!session || !tenantId || !user || !deviceId) return;
+    // SHOULD-FIX 4: guard deviceType — never pass null/wildcard to planSegments.
+    if (!session || !tenantId || !user || !deviceId || !deviceType) return;
     setClosing(true);
     const endedAt = nowIso();
     try {
@@ -507,10 +525,13 @@ export default function SessionDetailScreen() {
               <AppText role="label" color={colors.textMuted} style={styles.sectionLabel}>
                 {t('session.mode.switch.title')}
               </AppText>
+              {/* SHOULD-FIX 4: mode-switch disabled until deviceType is confirmed.
+                  handleSwitchRequest guards internally, but setting disabled per-option
+                  makes the blocked state visually clear to the user. */}
               <SegmentedControl
                 options={[
-                  { value: 'single', label: t('playMode.single') },
-                  { value: 'multi', label: t('playMode.multi') },
+                  { value: 'single', label: t('playMode.single'), disabled: !deviceReady },
+                  { value: 'multi', label: t('playMode.multi'), disabled: !deviceReady },
                 ]}
                 value={currentPlayMode}
                 onChange={(v) => handleSwitchRequest(v as PlayMode)}
@@ -641,13 +662,37 @@ export default function SessionDetailScreen() {
         {/* <OrdersSlot sessionId={session.id} /> */}
       </ScrollView>
 
-      {/* Close button — pinned at the bottom, above safe area */}
+      {/* Close button — pinned at the bottom, above safe area.
+          SHOULD-FIX 4: disabled until deviceData is loaded for open-meter sessions
+          (planSegments needs the real device_type for correct rate resolution).
+          deviceLoading/deviceError are shown as a caption when relevant. */}
       {!isClosed && (
         <View style={styles.footer}>
+          {billingMode === 'open' && deviceError && (
+            <AppText
+              role="caption"
+              color={colors.danger}
+              align="center"
+              style={styles.deviceWarning}
+            >
+              {t('session.device.error')}
+            </AppText>
+          )}
+          {billingMode === 'open' && deviceLoading && !deviceError && (
+            <AppText
+              role="caption"
+              color={colors.textMuted}
+              align="center"
+              style={styles.deviceWarning}
+            >
+              {t('session.device.loading')}
+            </AppText>
+          )}
           <Button
             variant="primary"
             size="lg"
             fullWidth
+            disabled={billingMode === 'open' && !deviceReady}
             onPress={() => setConfirmCloseVisible(true)}
             accessibilityLabel={t('session.close.confirm')}
           >
@@ -820,5 +865,10 @@ const styles = StyleSheet.create({
     paddingBottom: spacing['2xl'],
     borderTopWidth: 1,
     borderTopColor: colors.border,
+    gap: spacing.xs,
+  },
+  deviceWarning: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xs,
   },
 });

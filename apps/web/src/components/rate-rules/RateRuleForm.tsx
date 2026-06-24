@@ -15,11 +15,12 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { egpToPiastres, piastresToEgp, uuidv4 } from '@ps/core';
+import { egpToPiastres, piastresToEgp, uuidv4, uuidv5, PS_UUID_NS } from '@ps/core';
 import type { RateRule, BillingMode, PlayModeRule, DayTypeRule } from '@ps/core';
 import { Button } from '@/components/ui/Button';
 import { TextField } from '@/components/ui/TextField';
 import { getBrowserClient } from '@/lib/supabase/client';
+import { useAuth } from '@/lib/auth/AuthContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,11 +41,17 @@ function toEgpStr(piastres: number | null | undefined): string {
   return String(piastresToEgp(piastres));
 }
 
-/** EGP string → integer piastres. Returns null if blank, NaN → null. */
+/** EGP string → integer piastres. Returns null if blank or not a valid number.
+ *  Normalises Arabic/Western comma decimals (e.g. "5,5" → 5.5).
+ *  Rejects trailing garbage ("5abc") that parseFloat would silently accept.
+ */
 function fromEgpStr(s: string): number | null {
-  if (s.trim() === '') return null;
-  const egp = parseFloat(s);
-  if (isNaN(egp)) return null;
+  const normalised = s.trim().replace(',', '.');
+  if (normalised === '') return null;
+  // Strict check: the whole string must be a valid decimal number.
+  if (!/^-?\d+(\.\d+)?$/.test(normalised)) return null;
+  const egp = Number(normalised);
+  if (!isFinite(egp)) return null;
   return egpToPiastres(egp);
 }
 
@@ -181,6 +188,7 @@ function toFormState(rule?: RateRule): FormState {
 
 export function RateRuleForm({ initial, onSuccess, onCancel }: RateRuleFormProps) {
   const t = useTranslations();
+  const { claim, user } = useAuth();
   const [form, setForm] = useState<FormState>(toFormState(initial));
   const [errors, setErrors] = useState<FormErrors>({});
   const [saving, setSaving] = useState(false);
@@ -211,7 +219,14 @@ export function RateRuleForm({ initial, onSuccess, onCancel }: RateRuleFormProps
     try {
       const supabase = getBrowserClient();
 
-      // Build the row to upsert (AC 32 — tenant_id comes from RLS, not client body)
+      // Tenant identity comes from the signed JWT claim (app_metadata.tenant_id).
+      // The client sends its own claim value; RLS WITH CHECK validates it server-side.
+      // An attacker sending a different tenant_id is rejected by the policy.
+      // (CLAUDE.md §5, ADR-0003 — never bypass RLS or scope with service role.)
+      const tenantId = claim?.tenant_id;
+      const actorId = user?.id;
+      if (!tenantId || !actorId) throw new Error('Not authenticated');
+
       const id = initial?.id ?? uuidv4();
       const now = new Date().toISOString();
 
@@ -229,6 +244,10 @@ export function RateRuleForm({ initial, onSuccess, onCancel }: RateRuleFormProps
 
       const row = {
         id,
+        // tenant_id from the JWT claim: client sends its own claim value and RLS
+        // WITH CHECK (tenant_id = current_tenant_id()) validates it server-side.
+        // This is the correct pattern — NOT a trust violation (ADR-0003, CLAUDE.md §5).
+        tenant_id: tenantId,
         device_type: form.device_type.trim() || 'any',
         play_mode: form.play_mode,
         billing_mode: form.billing_mode as BillingMode,
@@ -249,7 +268,6 @@ export function RateRuleForm({ initial, onSuccess, onCancel }: RateRuleFormProps
       };
 
       // Upsert (idempotent — client-generated UUID, AC 41 / CLAUDE.md §2.8)
-      // tenant_id is NOT sent — RLS WITH CHECK enforces it from the JWT claim (AC 32)
       const { data, error } = await supabase
         .from('rate_rules')
         .upsert(row, { onConflict: 'id' })
@@ -278,17 +296,27 @@ export function RateRuleForm({ initial, onSuccess, onCancel }: RateRuleFormProps
               },
             };
 
-      // Audit write is a follow-on idempotent insert (see ADR-0005 Decision 5).
-      // No error thrown if this fails — the mutation is already committed.
-      await supabase.from('audit_log').insert({
-        id: uuidv4(),
-        action,
-        entity: 'rate_rule',
-        entity_id: id,
-        amount: null,
-        meta: auditMeta,
-        created_at: now,
-      });
+      // Audit write is a follow-on IDEMPOTENT upsert (ADR-0005 Decision 5,
+      // CLAUDE.md §2.8). The id is deterministic from the operation's identity
+      // (action:ruleId:instant) so a double-fire of the same save upserts the
+      // same row instead of duplicating. The error is surfaced (not swallowed):
+      // a missing audit row on a money-config change must be visible (§2.7).
+      // tenant_id and actor_id are required NOT NULL columns (0002 migration).
+      const { error: auditErr } = await supabase.from('audit_log').upsert(
+        {
+          id: uuidv5(`${action}:${id}:${now}`, PS_UUID_NS),
+          tenant_id: tenantId,
+          actor_id: actorId,
+          action,
+          entity: 'rate_rule',
+          entity_id: id,
+          amount: null,
+          meta: auditMeta,
+          created_at: now,
+        },
+        { onConflict: 'id' },
+      );
+      if (auditErr) throw auditErr;
 
       onSuccess(data as RateRule);
     } catch (err) {
