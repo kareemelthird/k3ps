@@ -105,4 +105,33 @@ export function isWithinWindow(
   return t >= start || t < end;
 }
 
+/** Default business-day cutover hour (ADR-0006 Decision 1). */
+export const DEFAULT_CUTOVER_HOUR = 6;
+
+/**
+ * The business-day key `'YYYY-MM-DD'` for an instant, in `tz`, shifted by a
+ * cutover hour so late-night activity stays on the previous business day
+ * (ADR-0006 Decision 1 — the dominant late-night-café pattern).
+ *
+ * Algorithm: take the local (`tz`) wall-clock of `atIso`, subtract `cutoverHour`
+ * hours, and return the resulting local calendar date.
+ *   cutover 6: `2026-06-12T02:00` Cairo → `'2026-06-11'`;
+ *              `2026-06-12T06:00` Cairo → `'2026-06-12'`.
+ *
+ * Pure: the instant is passed in (no clock read). DST-safe via the dayjs tz
+ * plugin already used by {@link dayTypeAt} / {@link localHm} — the subtraction
+ * happens on the zoned instant, so a DST shift on the business day is absorbed.
+ *
+ * @param atIso      the instant (UTC ISO-8601, or any dayjs-parseable instant)
+ * @param cutoverHour hours after local midnight the business day starts (default 6)
+ * @param tz         business timezone (default {@link CAFE_TZ})
+ */
+export function businessDayKey(
+  atIso: string,
+  cutoverHour: number = DEFAULT_CUTOVER_HOUR,
+  tz: string = CAFE_TZ,
+): string {
+  return dayjs(atIso).tz(tz).subtract(cutoverHour, 'hour').format('YYYY-MM-DD');
+}
+
 export { dayjs };

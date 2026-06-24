@@ -16,6 +16,8 @@ import {
   nowIso,
   localHm,
   localHour,
+  businessDayKey,
+  DEFAULT_CUTOVER_HOUR,
 } from '../time/time';
 
 // ─── Known UTC → Cairo mapping used across tests ──────────────────────────────
@@ -263,5 +265,94 @@ describe('localHour', () => {
   test('returns correct hour for a known Cairo instant', () => {
     // 2026-01-02 10:00 UTC = 12:00 Cairo
     expect(localHour('2026-01-02T10:00:00.000Z')).toBe(12);
+  });
+});
+
+// ─── businessDayKey (ADR-0006 Decision 1) ────────────────────────────────────
+//
+// Cairo is UTC+2 in winter (standard) and UTC+3 in summer (DST, late-Apr→late-Oct).
+// Default cutover hour = 6: instants before 06:00 local belong to the PREVIOUS
+// business day; 06:00 and after belong to the current local date.
+
+describe('businessDayKey', () => {
+  test('default cutover hour constant is 6', () => {
+    expect(DEFAULT_CUTOVER_HOUR).toBe(6);
+  });
+
+  test('02:00 Cairo (before cutover) maps to the PREVIOUS business day', () => {
+    // 2026-06-12 02:00 Cairo (summer, UTC+3) = 2026-06-11 23:00 UTC.
+    expect(businessDayKey('2026-06-11T23:00:00.000Z')).toBe('2026-06-11');
+  });
+
+  test('06:00 Cairo (exactly at cutover) maps to the SAME local date', () => {
+    // 2026-06-12 06:00 Cairo (summer, UTC+3) = 2026-06-12 03:00 UTC.
+    expect(businessDayKey('2026-06-12T03:00:00.000Z')).toBe('2026-06-12');
+  });
+
+  test('05:59 Cairo (one minute before cutover) stays on the previous day', () => {
+    // 2026-06-12 05:59 Cairo (UTC+3) = 2026-06-12 02:59 UTC.
+    expect(businessDayKey('2026-06-12T02:59:00.000Z')).toBe('2026-06-11');
+  });
+
+  test('midnight Cairo maps to the previous business day (default cutover)', () => {
+    // 2026-06-12 00:00 Cairo (UTC+3) = 2026-06-11 21:00 UTC.
+    expect(businessDayKey('2026-06-11T21:00:00.000Z')).toBe('2026-06-11');
+  });
+
+  test('noon Cairo maps to the same local date', () => {
+    // 2026-06-12 12:00 Cairo (UTC+3) = 2026-06-12 09:00 UTC.
+    expect(businessDayKey('2026-06-12T09:00:00.000Z')).toBe('2026-06-12');
+  });
+
+  test('custom cutover hour = 0 (raw calendar day): midnight stays same day', () => {
+    // 2026-06-12 00:00 Cairo = 2026-06-11 21:00 UTC; with cutover 0 → same date.
+    expect(businessDayKey('2026-06-11T21:00:00.000Z', 0)).toBe('2026-06-12');
+  });
+
+  test('custom cutover hour = 8: 07:00 Cairo still belongs to previous day', () => {
+    // 2026-06-12 07:00 Cairo (UTC+3) = 2026-06-12 04:00 UTC; 07 < 08 → prev.
+    expect(businessDayKey('2026-06-12T04:00:00.000Z', 8)).toBe('2026-06-11');
+  });
+
+  test('custom cutover hour = 8: 08:00 Cairo flips to current day', () => {
+    // 2026-06-12 08:00 Cairo (UTC+3) = 2026-06-12 05:00 UTC.
+    expect(businessDayKey('2026-06-12T05:00:00.000Z', 8)).toBe('2026-06-12');
+  });
+
+  test('winter (UTC+2) instant: 02:00 Cairo maps to previous day', () => {
+    // 2026-01-02 02:00 Cairo (winter, UTC+2) = 2026-01-02 00:00 UTC.
+    expect(businessDayKey('2026-01-02T00:00:00.000Z')).toBe('2026-01-01');
+  });
+
+  test('winter (UTC+2) instant: 06:00 Cairo maps to same day', () => {
+    // 2026-01-02 06:00 Cairo (winter, UTC+2) = 2026-01-02 04:00 UTC.
+    expect(businessDayKey('2026-01-02T04:00:00.000Z')).toBe('2026-01-02');
+  });
+
+  test('DST-spanning business day: 03:00 Cairo summer still maps correctly', () => {
+    // A late-night instant in summer (UTC+3). 2026-07-15 03:00 Cairo =
+    // 2026-07-15 00:00 UTC; 03 < 06 → previous business day.
+    expect(businessDayKey('2026-07-15T00:00:00.000Z')).toBe('2026-07-14');
+  });
+
+  test('weekend sanity (Fri/Sat): a Friday late-night session keys to Friday', () => {
+    // Egypt weekend = Fri+Sat. 2026-01-03 (Sat) 01:00 Cairo (winter, UTC+2) =
+    // 2026-01-02 23:00 UTC; before cutover → previous business day 2026-01-02
+    // (Friday). Confirms a Sat-after-midnight session reconciles into Friday.
+    const key = businessDayKey('2026-01-02T23:00:00.000Z');
+    expect(key).toBe('2026-01-02');
+    expect(dayTypeAt('2026-01-02T10:00:00.000Z')).toBe('weekend'); // Friday
+  });
+
+  test('explicit tz argument is honoured (UTC tz, no cutover)', () => {
+    // Same instant, tz=UTC, cutover 0 → the raw UTC calendar date.
+    expect(businessDayKey('2026-06-11T21:00:00.000Z', 0, 'UTC')).toBe(
+      '2026-06-11',
+    );
+  });
+
+  test('pure: same input → same output across repeated calls', () => {
+    const iso = '2026-06-12T03:00:00.000Z';
+    expect(businessDayKey(iso)).toBe(businessDayKey(iso));
   });
 });

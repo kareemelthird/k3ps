@@ -78,8 +78,8 @@ select lives_ok(
 -- ---------------------------------------------------------------------------
 -- PRODUCTS — SELECT isolation
 -- ---------------------------------------------------------------------------
-select is((select count(*) from public.products), 3::bigint,
-  'products: A sees exactly its own 3 rows');
+select is((select count(*) from public.products), 7::bigint,
+  'products: A sees exactly its own 7 rows');
 select is((select count(*) from public.products
             where tenant_id = 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb'),
   0::bigint, 'products: A sees 0 of B''s rows');
@@ -105,8 +105,8 @@ select is((select count(*) from public.rate_rules
 -- ---------------------------------------------------------------------------
 -- SETTINGS — SELECT isolation (per-tenant key/value)
 -- ---------------------------------------------------------------------------
-select is((select count(*) from public.settings), 4::bigint,
-  'settings: A sees exactly its own 4 keys');
+select is((select count(*) from public.settings), 5::bigint,
+  'settings: A sees exactly its own 5 keys');
 select is((select count(*) from public.settings
             where tenant_id = 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb'),
   0::bigint, 'settings: A sees 0 of B''s rows');

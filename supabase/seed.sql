@@ -154,33 +154,71 @@ on conflict (id) do nothing;
 
 -- =============================================================================
 -- PRODUCTS
+-- Per-tenant catalog: mix of STOCK-TRACKED (stock integer) and UNTRACKED
+-- (stock null), spread across ≥2 categories. Prices/costs in integer piastres
+-- (100 piastres = 1 EGP). All UUIDs are valid RFC-4122 hex.
 -- =============================================================================
 
 insert into public.products (id, tenant_id, name, category, price, cost, stock, is_active)
 values
-  -- Tenant A products
-  ('aaaaaaaa-c0de-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa', 'Pepsi Can',     'drinks',  500,  250, 100, true),
-  ('aaaaaaaa-c0de-4000-8000-000000000002', 'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa', 'Lays Chips',    'snacks',  700,  350, 50,  true),
-  ('aaaaaaaa-c0de-4000-8000-000000000003', 'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa', 'Water Bottle',  'drinks',  300,  100, null, true),  -- untracked
-  -- Tenant B products
-  ('bbbbbbbb-c0de-4000-8000-000000000001', 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb', 'Coca Cola',     'drinks',  600,  300, 80,  true),
-  ('bbbbbbbb-c0de-4000-8000-000000000002', 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb', 'Energy Bar',    'snacks',  1200, 600, 30,  true)
+  -- ── Tenant A product catalog ─────────────────────────────────────────────
+  -- drinks category (3 rows: 2 tracked, 1 untracked)
+  ('aaaaaaaa-c0de-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'Pepsi Can',        'drinks',   500,  250,  100, true),   -- tracked
+  ('aaaaaaaa-c0de-4000-8000-000000000002', 'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'Mineral Water',    'drinks',   300,  100, null, true),   -- UNTRACKED (stock=null)
+  ('aaaaaaaa-c0de-4000-8000-000000000003', 'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'Orange Juice',     'drinks',   800,  400,   60, true),   -- tracked
+  -- snacks category (3 rows: 2 tracked, 1 untracked)
+  ('aaaaaaaa-c0de-4000-8000-000000000004', 'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'Lays Chips',       'snacks',   700,  350,   50, true),   -- tracked
+  ('aaaaaaaa-c0de-4000-8000-000000000005', 'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'Chocolate Bar',    'snacks',  1000,  500,   40, true),   -- tracked
+  ('aaaaaaaa-c0de-4000-8000-000000000006', 'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'House Sandwich',   'snacks',  2000, null,  null, true),  -- UNTRACKED + uncosted
+  -- accessories category (1 row: tracked, inactive to demo soft-deactivate)
+  ('aaaaaaaa-c0de-4000-8000-000000000007', 'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'Controller Cover', 'accessories', 5000, 2500, 10, false),  -- inactive
+
+  -- ── Tenant B product catalog ─────────────────────────────────────────────
+  -- drinks category (2 rows: 1 tracked, 1 untracked)
+  ('bbbbbbbb-c0de-4000-8000-000000000001', 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb',
+   'Coca Cola',        'drinks',   600,  300,   80, true),   -- tracked
+  ('bbbbbbbb-c0de-4000-8000-000000000002', 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb',
+   'Iced Tea',         'drinks',   700,  350, null, true),   -- UNTRACKED (stock=null)
+  -- snacks category (2 rows: 1 tracked, 1 untracked)
+  ('bbbbbbbb-c0de-4000-8000-000000000003', 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb',
+   'Energy Bar',       'snacks',  1200,  600,   30, true),   -- tracked
+  ('bbbbbbbb-c0de-4000-8000-000000000004', 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb',
+   'Popcorn Cup',      'snacks',   900, null,  null, true),  -- UNTRACKED + uncosted
+  -- accessories category (1 row: tracked)
+  ('bbbbbbbb-c0de-4000-8000-000000000005', 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb',
+   'Headset Rental',   'accessories', 3000, 1500, 5, true)   -- tracked
 on conflict (id) do nothing;
 
 -- =============================================================================
 -- SETTINGS
+-- Includes the business_day setting (ADR-0006 Decision 1) for both tenants.
+-- key='business_day', value={"cutover_hour":6} means a shift/session that
+-- starts before 06:00 Cairo local time is attributed to the previous business
+-- day — the standard late-night café pattern. Inherited verbatim by Phase-6
+-- reporting. The key is absent for a tenant → default 6 applies in @ps/core.
 -- =============================================================================
 
 insert into public.settings (tenant_id, key, value)
 values
-  ('aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa', 'cafe_name',    '"Alpha Café"'),
-  ('aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa', 'currency',     '"EGP"'),
-  ('aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa', 'timezone',     '"Africa/Cairo"'),
+  ('aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa', 'cafe_name',     '"Alpha Café"'),
+  ('aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa', 'currency',      '"EGP"'),
+  ('aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa', 'timezone',      '"Africa/Cairo"'),
   ('aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa', 'schema_version', '2'),
-  ('bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb', 'cafe_name',    '"Bravo Lounge"'),
-  ('bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb', 'currency',     '"EGP"'),
-  ('bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb', 'timezone',     '"Africa/Cairo"'),
-  ('bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb', 'schema_version', '2')
+  -- ADR-0006 Decision 1: business-day cutover hour (default 6, configurable per tenant)
+  ('aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa', 'business_day',  '{"cutover_hour":6}'),
+  ('bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb', 'cafe_name',     '"Bravo Lounge"'),
+  ('bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb', 'currency',      '"EGP"'),
+  ('bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb', 'timezone',      '"Africa/Cairo"'),
+  ('bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb', 'schema_version', '2'),
+  -- ADR-0006 Decision 1: business-day cutover hour for Tenant B (same default)
+  ('bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb', 'business_day',  '{"cutover_hour":6}')
 on conflict (tenant_id, key) do nothing;
 
 -- =============================================================================

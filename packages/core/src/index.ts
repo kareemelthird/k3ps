@@ -27,4 +27,6 @@ export * from './time';
 export * from './id';
 export * from './inventory';
 export * from './pricing';
+export * from './orders';
+export * from './shifts';
 export * from './types';
