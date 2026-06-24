@@ -1,4 +1,110 @@
 {
+  "rateRules": {
+    "title": "قواعد الأسعار",
+    "subtitle": "إدارة أسعار الأجهزة حسب النوع ووضع اللعب والوقت",
+    "create": "إضافة قاعدة سعر",
+    "edit": "تعديل القاعدة",
+    "empty": {
+      "title": "لا توجد قواعد أسعار",
+      "body": "أضف قاعدة سعر لتبدأ بتسعير الجلسات"
+    },
+    "table": {
+      "deviceType": "نوع الجهاز",
+      "playMode": "وضع اللعب",
+      "billingMode": "طريقة الفوترة",
+      "dayType": "نوع اليوم",
+      "timeWindow": "النافذة الزمنية",
+      "price": "السعر",
+      "priority": "الأولوية",
+      "status": "الحالة"
+    },
+    "field": {
+      "deviceType": "نوع الجهاز",
+      "deviceTypeHelper": "مثال: PS5 أو PS4 أو VIP أو any لتطبق على الكل",
+      "playMode": "وضع اللعب",
+      "billingMode": "طريقة الفوترة",
+      "dayType": "نوع اليوم",
+      "timeStart": "بداية الوقت (HH:mm)",
+      "timeEnd": "نهاية الوقت (HH:mm)",
+      "timeHelper": "اتركهما فارغتين للتطبيق طوال اليوم — يجب ملؤهما معاً",
+      "pricePerHour": "السعر بالساعة (جنيه)",
+      "blockMinutes": "مدة الباقة (دقيقة)",
+      "blockPrice": "سعر الباقة (جنيه)",
+      "fixedMatchPrice": "سعر المباراة الثابت (جنيه)",
+      "roundingMinutes": "تقريب الدقائق",
+      "minChargeMinutes": "الحد الأدنى لدقائق الفوترة",
+      "priority": "الأولوية (رقم — الأعلى يطبق أولاً)",
+      "active": "نشطة"
+    },
+    "billingMode": {
+      "open": "مقياس مفتوح",
+      "prepaid": "مدفوع مسبقاً",
+      "fixed_match": "سعر مباراة ثابت"
+    },
+    "playMode": {
+      "single": "فردي",
+      "multi": "جماعي",
+      "any": "الكل"
+    },
+    "dayType": {
+      "weekday": "يوم عمل",
+      "weekend": "إجازة (جمعة/سبت)",
+      "any": "كل الأيام"
+    },
+    "status": {
+      "active": "نشطة",
+      "inactive": "غير نشطة"
+    },
+    "action": {
+      "save": "حفظ",
+      "cancel": "إلغاء",
+      "deactivate": "تعطيل",
+      "reactivate": "تفعيل",
+      "deactivateConfirm": "هل تريد تعطيل هذه القاعدة؟ لن تُحذف — ستُحفظ للمراجعة التاريخية.",
+      "reactivateConfirm": "هل تريد تفعيل هذه القاعدة مجدداً؟"
+    },
+    "validation": {
+      "billingModeRequired": "طريقة الفوترة مطلوبة",
+      "pricePerHourRequired": "السعر بالساعة مطلوب",
+      "pricePerHourPositive": "يجب أن يكون السعر بالساعة أكبر من صفر",
+      "blockMinutesRequired": "مدة الباقة مطلوبة",
+      "blockMinutesPositive": "مدة الباقة يجب أن تكون أكبر من صفر",
+      "blockPriceRequired": "سعر الباقة مطلوب",
+      "blockPriceNonNegative": "سعر الباقة لا يمكن أن يكون سالباً",
+      "fixedMatchPriceRequired": "سعر المباراة الثابت مطلوب",
+      "fixedMatchPriceNonNegative": "سعر المباراة لا يمكن أن يكون سالباً",
+      "roundingMinutesNonNegative": "دقائق التقريب لا تكون سالبة",
+      "minChargeMinutesNonNegative": "الحد الأدنى لا يكون سالباً",
+      "timeBothOrNone": "يجب ملء وقت البداية والنهاية معاً أو تركهما فارغين",
+      "timeFormat": "صيغة الوقت يجب أن تكون HH:mm (مثال: 18:00)"
+    },
+    "preview": {
+      "title": "معاينة السعر المحلول",
+      "description": "أدخل معلومات الجهاز والوقت لترى أي قاعدة ستُطبق على الكاونتر",
+      "deviceType": "نوع الجهاز",
+      "playMode": "وضع اللعب",
+      "billingMode": "طريقة الفوترة",
+      "sampleTime": "الوقت النموذجي",
+      "resolve": "احسب السعر",
+      "result": {
+        "noRule": "لا توجد قاعدة مطابقة — السعر: 0",
+        "winningRule": "القاعدة الفائزة",
+        "resolvedRate": "السعر المحلول",
+        "ruleId": "معرف القاعدة",
+        "priority": "الأولوية"
+      }
+    },
+    "audit": {
+      "created": "تم إنشاء قاعدة السعر",
+      "updated": "تم تعديل قاعدة السعر",
+      "deactivated": "تم تعطيل قاعدة السعر",
+      "reactivated": "تم تفعيل قاعدة السعر"
+    },
+    "allDay": "طوال اليوم",
+    "timeRange": "من {start} إلى {end}",
+    "noPrice": "—",
+    "ownerOnly": "يتطلب صلاحية المالك للكتابة"
+  },
   "auth": {
     "signIn": {
       "title": "تسجيل الدخول",
@@ -95,12 +201,14 @@
   "action": {
     "retry": "إعادة المحاولة",
     "cancel": "إلغاء",
-    "signOut": "تسجيل الخروج"
+    "signOut": "تسجيل الخروج",
+    "close": "إغلاق"
   },
   "nav": {
     "devices": "الأجهزة",
     "sessions": "الجلسات",
-    "dashboard": "لوحة التحكم"
+    "dashboard": "لوحة التحكم",
+    "rateRules": "قواعد الأسعار"
   },
   "app": {
     "name": "PS Management"

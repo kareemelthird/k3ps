@@ -1,15 +1,29 @@
 /**
- * Session detail — M5 (design spec §M5).
- * Live timer from started_at; running total via @ps/core.
- * Close flow: ConfirmDialog → compute time_total via @ps/core → close session
- * → free device → write audit_log → route back to grid.
+ * Session detail — Phase 4 (ACs 33–42, 44–46).
  *
- * INVARIANT: timer value = elapsedSeconds(startedAt, now), never a counter.
- * Money = integer piastres via openMeterCostPiastres/@ps/core. No floats. (CLAUDE.md §2)
- * Times displayed in Africa/Cairo via localHm (CLAUDE.md §3).
+ * LIVE COST CONTRACT (ADR-0005 Decision 1 — preview-splits, close-materializes):
+ *   For open-meter, the live display calls planSegments(rules, ctx, openSeg.started_at, now)
+ *   → aggregateOpenMeter over all sub-intervals. No DB write on boundary crossing.
+ *   The tick only forces a re-render; cost is always re-derived from timestamps.
+ *
+ * CLOSE CONTRACT:
+ *   planSegments materializes N segment rows at close time. aggregateOpenMeter
+ *   sums them. The stored time_total provably equals reconstructTimeCost over
+ *   those rows (AC 25, 37, 38).
+ *
+ * AUDIT (AC 40–42):
+ *   One audit_log row per close, idempotent (client UUID + upsert).
+ *   amount = grand_total.
+ *
+ * INVARIANTS (CLAUDE.md §2):
+ *   - Integer piastres via @ps/core. No inline money math.
+ *   - Timer = elapsedSeconds(startedAt, now), never a counter.
+ *   - Cairo TZ via localHm/formatClock.
+ *   - All strings via t('key'), Arabic-Indic numerals via toArabicDigits/formatEgp.
  */
 import React, { useState } from 'react';
 import {
+  Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -20,17 +34,31 @@ import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 
 import {
+  computeFixedMatchCost,
+  computeGrandTotal,
+  computePrepaidCost,
   formatEgp,
   localHm,
   nowIso,
-  openMeterCostPiastres,
+  reconstructTimeCost,
   toArabicDigits,
+  type PlayMode,
+  type SegmentPlan,
 } from '@ps/core';
 
-import { useCloseSession } from '../../../src/features/devices/api';
+import {
+  useSessionDetail,
+  useRateRules,
+  useSwitchPlayMode,
+  useCloseSessionPhase4,
+  useIncrementMatchCount,
+  computeLiveOpenMeterWithType,
+  type SegmentRow,
+  type SessionRow,
+} from '../../../src/features/session/api';
 import { useAuth } from '../../../src/stores/useAuth';
 import { supabase } from '../../../src/lib/supabase';
-import { colors, spacing, radius } from '../../../src/design/tokens';
+import { colors, spacing, radius, fontSize, fontWeight, TAP_TARGET } from '../../../src/design/tokens';
 import { AppText } from '../../../src/components/AppText';
 import { Button } from '../../../src/components/Button';
 import { ConfirmDialog } from '../../../src/components/ConfirmDialog';
@@ -38,147 +66,348 @@ import { EmptyState } from '../../../src/components/EmptyState';
 import { ErrorState } from '../../../src/components/ErrorState';
 import { LiveTimer } from '../../../src/components/LiveTimer';
 import { OfflineBanner } from '../../../src/components/OfflineBanner';
+import { SegmentedControl } from '../../../src/components/SegmentedControl';
+import { Sheet } from '../../../src/components/Sheet';
 import { Skeleton } from '../../../src/components/Skeleton';
 import { StatusPill } from '../../../src/components/StatusPill';
 import { useTick } from '../../../src/hooks/useTick';
+
+// ─── Sub-component: SegmentRow card ──────────────────────────────────────────
+
+interface SegmentCardProps {
+  plan: SegmentPlan;
+  index: number;
+  isLast: boolean;
+}
+
+function SegmentCard({ plan, index, isLast }: SegmentCardProps) {
+  const { t } = useTranslation();
+  const atIso = isLast ? nowIso() : plan.ended_at;
+
+  // Cost for this sub-segment only (not aggregated with min-charge — that's session-level).
+  // Display here is informational; grand total on the session card is authoritative.
+  const minutes = Math.max(
+    0,
+    Math.round(
+      (new Date(atIso).getTime() - new Date(plan.started_at).getTime()) / 60000,
+    ),
+  );
+
+  return (
+    <View style={segStyles.row} accessible accessibilityRole="text">
+      <View style={segStyles.left}>
+        <AppText role="label" color={colors.primary}>
+          {t('session.segments.label', { index: toArabicDigits(String(index)) })}
+        </AppText>
+        <AppText role="caption" color={colors.textMuted}>
+          {toArabicDigits(localHm(plan.started_at))}
+          {' — '}
+          {isLast ? '...' : toArabicDigits(localHm(plan.ended_at))}
+        </AppText>
+        <AppText role="micro" color={colors.textFaint}>
+          {t('playMode.' + plan.play_mode)}
+          {'  '}
+          {toArabicDigits(String(minutes))} {t('minutes')}
+        </AppText>
+      </View>
+      <View style={segStyles.right}>
+        <AppText role="caption" color={colors.textMuted}>
+          {plan.price_per_hour_snapshot > 0
+            ? t('rate.perHour', {
+                rate: toArabicDigits(
+                  formatEgp(plan.price_per_hour_snapshot, false),
+                ),
+              })
+            : t('rate.noRule')}
+        </AppText>
+      </View>
+    </View>
+  );
+}
+
+const segStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.xs,
+    backgroundColor: colors.surface2,
+  },
+  left: { flex: 1, gap: spacing['2xs'] },
+  right: { alignItems: 'flex-end' },
+});
+
+// ─── Sub-component: Match counter (fixed_match mode) ─────────────────────────
+
+interface MatchCounterProps {
+  sessionId: string;
+  tenantId: string;
+  matchCount: number;
+  lockedPrice: number;
+  disabled?: boolean;
+}
+
+function MatchCounter({ sessionId, tenantId, matchCount, lockedPrice, disabled }: MatchCounterProps) {
+  const { t } = useTranslation();
+  const { mutateAsync: increment } = useIncrementMatchCount();
+
+  const cost = computeFixedMatchCost({ fixed_match_price: lockedPrice, match_count: matchCount });
+
+  return (
+    <View style={ctrStyles.container}>
+      <AppText role="label" color={colors.textMuted}>
+        {t('session.matchCount.label')}
+      </AppText>
+      <View style={ctrStyles.row}>
+        <Pressable
+          onPress={() =>
+            void increment({ sessionId, tenantId, currentCount: matchCount, delta: -1 })
+          }
+          disabled={disabled || matchCount <= 0}
+          style={[ctrStyles.btn, (disabled || matchCount <= 0) && ctrStyles.btnDisabled]}
+          accessibilityLabel={t('session.matchCount.decrement')}
+          accessibilityRole="button"
+          hitSlop={8}
+        >
+          <AppText role="h2" color={disabled || matchCount <= 0 ? colors.textFaint : colors.text}>
+            {'−'}
+          </AppText>
+        </Pressable>
+
+        <View style={ctrStyles.count} accessible accessibilityRole="text">
+          <AppText role="h1" color={colors.primary} style={ctrStyles.countText}>
+            {toArabicDigits(String(matchCount))}
+          </AppText>
+        </View>
+
+        <Pressable
+          onPress={() =>
+            void increment({ sessionId, tenantId, currentCount: matchCount, delta: 1 })
+          }
+          disabled={disabled}
+          style={[ctrStyles.btn, disabled && ctrStyles.btnDisabled]}
+          accessibilityLabel={t('session.matchCount.increment')}
+          accessibilityRole="button"
+          hitSlop={8}
+        >
+          <AppText role="h2" color={disabled ? colors.textFaint : colors.text}>
+            {'+'}
+          </AppText>
+        </Pressable>
+      </View>
+
+      <AppText role="money" color={colors.primary} style={ctrStyles.cost}>
+        {formatEgp(cost)}
+      </AppText>
+    </View>
+  );
+}
+
+const ctrStyles = StyleSheet.create({
+  container: { alignItems: 'center', gap: spacing.sm },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.xl },
+  btn: {
+    width: TAP_TARGET,
+    height: TAP_TARGET,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surface3,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  btnDisabled: { opacity: 0.4 },
+  count: {
+    minWidth: 64,
+    alignItems: 'center',
+  },
+  countText: {
+    fontSize: 40,
+    fontWeight: '800' as const,
+  },
+  cost: {
+    fontSize: 28,
+    fontWeight: '700' as const,
+  },
+});
+
+// ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function SessionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t } = useTranslation();
   const { claim, user } = useAuth();
-  const { mutateAsync: closeSession } = useCloseSession();
 
-  const [confirmVisible, setConfirmVisible] = useState(false);
+  const [confirmCloseVisible, setConfirmCloseVisible] = useState(false);
+  const [confirmSwitchVisible, setConfirmSwitchVisible] = useState(false);
+  const [pendingPlayMode, setPendingPlayMode] = useState<PlayMode | null>(null);
   const [closing, setClosing] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const [closedAt, setClosedAt] = useState<string | null>(null);
-
-  // Tick to force re-render (not the source of the value)
-  useTick(closedAt ? null : 1000);
 
   const tenantId = claim?.tenant_id ?? null;
 
-  // Load session + its first segment (for the rate snapshot)
-  const {
-    data,
-    isLoading,
-    error,
-    refetch,
-  } = useQuery({
-    queryKey: ['session', id, tenantId],
-    enabled: Boolean(id && tenantId),
-    queryFn: async () => {
-      const [sessionRes, segmentRes] = await Promise.all([
-        supabase
-          .from('sessions')
-          .select('*')
-          .eq('id', id)
-          .eq('tenant_id', tenantId)
-          .single(),
-        supabase
-          .from('session_segments')
-          .select('*')
-          .eq('session_id', id)
-          .eq('tenant_id', tenantId)
-          .order('started_at', { ascending: true })
-          .limit(1)
-          .single(),
-      ]);
+  // ── Data ──────────────────────────────────────────────────────────────────
 
-      if (sessionRes.error) throw sessionRes.error;
-      // SHOULD-FIX: surface a missing-rate error rather than silently billing 0
-      if (segmentRes.error) throw segmentRes.error;
-      return {
-        session: sessionRes.data as {
-          id: string;
-          tenant_id: string;
-          branch_id: string;
-          device_id: string;
-          started_at: string;
-          ended_at: string | null;
-          status: string;
-          grand_total: number;
-          time_total: number;
-        },
-        segment: segmentRes.data as {
-          price_per_hour_snapshot: number;
-        },
-      };
+  const {
+    data: sessionData,
+    isLoading: sessionLoading,
+    error: sessionError,
+    refetch: refetchSession,
+  } = useSessionDetail(id, tenantId);
+
+  const { data: rateRules = [] } = useRateRules(tenantId);
+
+  // Fetch the device row so we know device_type for planSegments resolution.
+  const deviceId = sessionData?.session.device_id;
+  const { data: deviceData } = useQuery({
+    queryKey: ['device', deviceId, tenantId],
+    enabled: Boolean(deviceId && tenantId),
+    staleTime: 300_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('devices')
+        .select('id, device_type, name')
+        .eq('id', deviceId)
+        .eq('tenant_id', tenantId)
+        .single();
+      if (error) throw error;
+      return data as { id: string; device_type: string; name: string };
     },
-    refetchInterval: 30_000,
   });
 
-  const session = data?.session;
-  const segment = data?.segment;
+  const session = sessionData?.session ?? null;
+  const segments = sessionData?.segments ?? [];
+  const deviceType = deviceData?.device_type ?? 'any';
 
-  // Compute live running total (integer piastres, @ps/core — never inline math)
-  // For a live session: pass nowIso() each tick. For closed: pass ended_at.
-  const now = closedAt ?? nowIso();
-  const liveTotalPiastres =
-    session && segment
-      ? openMeterCostPiastres(
-          session.started_at,
-          session.ended_at ?? now,
-          segment.price_per_hour_snapshot,
-        )
-      : 0;
+  // ── Tick to force re-render (never accumulates money — timer derives from timestamps) ──
+  useTick(closedAt ? null : 1000);
+
+  // ── Live cost (preview-splits, ADR-0005 Decision 1) ─────────────────────
+
+  const atIso = closedAt ?? nowIso();
+  const isClosed = session?.status === 'closed' || Boolean(closedAt);
+  const billingMode = session?.billing_mode ?? 'open';
+
+  // Derive live totals per billing mode:
+  let liveTotalPiastres = 0;
+  let liveSegmentPlans: SegmentPlan[] = [];
+
+  if (session && !isClosed) {
+    if (billingMode === 'open') {
+      const { grandTotal, segmentPlans } = computeLiveOpenMeterWithType(
+        session,
+        segments,
+        rateRules,
+        deviceType,
+        atIso,
+      );
+      liveTotalPiastres = grandTotal;
+      liveSegmentPlans = segmentPlans;
+    } else if (billingMode === 'prepaid') {
+      liveTotalPiastres = computePrepaidCost({
+        prepaid_total: session.prepaid_total ?? null,
+      });
+    } else if (billingMode === 'fixed_match') {
+      const firstSeg = segments[0];
+      liveTotalPiastres = computeGrandTotal({
+        time_total: computeFixedMatchCost({
+          fixed_match_price: firstSeg?.price_per_hour_snapshot ?? 0,
+          match_count: session.match_count ?? 0,
+        }),
+        orders_total: session.orders_total ?? 0,
+        discount: session.discount ?? 0,
+      });
+    }
+  }
+
+  const displayTotal = isClosed
+    ? (session?.grand_total ?? 0)
+    : liveTotalPiastres;
+
+  // The open segment (for mode-switch context).
+  const openSegment = segments.find((s) => s.ended_at === null) ?? null;
+  const currentPlayMode: PlayMode = openSegment?.play_mode ?? 'single';
+
+  // ── Mutations ─────────────────────────────────────────────────────────────
+
+  const { mutateAsync: switchPlayMode } = useSwitchPlayMode();
+  const { mutateAsync: closeSessionPhase4 } = useCloseSessionPhase4();
+
+  const handleSwitchRequest = (newMode: PlayMode) => {
+    if (newMode === currentPlayMode || isClosed || billingMode !== 'open') return;
+    setPendingPlayMode(newMode);
+    setConfirmSwitchVisible(true);
+  };
+
+  const handleSwitchConfirm = async () => {
+    if (!openSegment || !session || !tenantId || !pendingPlayMode) return;
+    setSwitching(true);
+    try {
+      await switchPlayMode({
+        sessionId: session.id,
+        tenantId,
+        openSegment,
+        newPlayMode: pendingPlayMode,
+        deviceType,
+        rateRules,
+      });
+    } finally {
+      setSwitching(false);
+      setConfirmSwitchVisible(false);
+      setPendingPlayMode(null);
+    }
+  };
 
   const handleCloseConfirm = async () => {
-    if (!session || !tenantId || !user) return;
-    // SHOULD-FIX: block close when rate snapshot is unavailable to avoid silent 0-billing
-    if (!segment) return;
+    if (!session || !tenantId || !user || !deviceId) return;
     setClosing(true);
     const endedAt = nowIso();
-
     try {
-      // BLOCKER: use @ps/core openMeterCostPiastres — integer piastres, no inline floats
-      const timeTotalPiastres = openMeterCostPiastres(
-        session.started_at,
-        endedAt,
-        segment.price_per_hour_snapshot,
-      );
-
-      await closeSession({
+      await closeSessionPhase4({
         sessionId: session.id,
-        deviceId: session.device_id,
+        deviceId,
         tenantId,
         branchId: session.branch_id,
         managerId: user.id,
-        timeTotalPiastres,
-        endedAt,
+        session,
+        segments,
+        rateRules,
+        deviceType,
       });
-
       setClosedAt(endedAt);
-      setConfirmVisible(false);
-
-      // Navigate back to device grid
+      setConfirmCloseVisible(false);
       router.back();
     } catch {
-      setConfirmVisible(false);
+      setConfirmCloseVisible(false);
     } finally {
       setClosing(false);
     }
   };
 
-  if (isLoading) {
+  // ── Loading / error states ─────────────────────────────────────────────────
+
+  if (sessionLoading) {
     return (
       <SafeAreaView style={styles.screen}>
         <OfflineBanner />
         <View style={styles.container}>
           <Skeleton height={40} width="60%" style={styles.skeleton} />
-          <Skeleton height={60} width="80%" style={styles.skeleton} />
+          <Skeleton height={80} width="80%" style={styles.skeleton} />
+          <Skeleton height={30} width="50%" style={styles.skeleton} />
           <Skeleton height={30} width="50%" style={styles.skeleton} />
         </View>
       </SafeAreaView>
     );
   }
 
-  if (error) {
+  if (sessionError) {
     return (
       <SafeAreaView style={styles.screen}>
         <OfflineBanner />
         <ErrorState
           message={t('state.error.generic')}
-          onRetry={() => void refetch()}
+          onRetry={() => void refetchSession()}
           retryLabel={t('action.retry')}
         />
       </SafeAreaView>
@@ -197,8 +426,14 @@ export default function SessionDetailScreen() {
     );
   }
 
-  const isClosed = session.status === 'closed' || Boolean(closedAt);
-  const displayTotal = isClosed ? session.grand_total : liveTotalPiastres;
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  const billingModeLabel =
+    billingMode === 'open'
+      ? t('billingMode.open')
+      : billingMode === 'prepaid'
+        ? t('billingMode.prepaid')
+        : t('billingMode.fixed_match');
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -222,43 +457,198 @@ export default function SessionDetailScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        {/* Hero: live timer */}
-        <View style={styles.hero}>
-          <LiveTimer
-            startedAt={session.started_at}
-            endedAt={isClosed ? (session.ended_at ?? closedAt ?? undefined) : undefined}
-            size="lg"
-            tickMs={1000}
-          />
 
-          {/* Running total — integer piastres via formatEgp */}
-          <AppText role="money" style={styles.total} color={colors.primary}>
+        {/* Hero card: timer + billing-mode badge + total */}
+        <View style={styles.hero}>
+          {/* Billing mode pill */}
+          <View style={styles.modeBadge}>
+            <AppText role="micro" color={colors.primary}>
+              {billingModeLabel}
+            </AppText>
+          </View>
+
+          {/* Live timer — open and prepaid (fixed_match doesn't show elapsed time) */}
+          {billingMode !== 'fixed_match' && (
+            <LiveTimer
+              startedAt={session.started_at}
+              endedAt={isClosed ? (session.ended_at ?? closedAt ?? undefined) : undefined}
+              size="lg"
+              tickMs={1000}
+            />
+          )}
+
+          {/* Running total — integer piastres via formatEgp + toArabicDigits */}
+          <AppText
+            role="money"
+            style={styles.total}
+            color={colors.primary}
+            accessibilityRole="text"
+            accessibilityLabel={`${t('session.close.grandTotal')}: ${formatEgp(displayTotal)}`}
+          >
             {formatEgp(displayTotal)}
           </AppText>
 
+          {/* Started at */}
           <View style={styles.startedRow}>
             <AppText role="caption" color={colors.textMuted}>
               {t('session.startedAt')}
             </AppText>
-            {/* SHOULD-FIX: use localHm (Africa/Cairo) — never device TZ */}
             <AppText role="caption" color={colors.textMuted}>
               {toArabicDigits(localHm(session.started_at))}
             </AppText>
           </View>
         </View>
 
-        {/* Reserved orders slot — Phase 6 will insert here */}
+        {/* ── Open-meter: play-mode switcher + live segment breakdown ── */}
+        {billingMode === 'open' && !isClosed && (
+          <>
+            {/* Play-mode switch control (single ↔ multi) */}
+            <View style={styles.section}>
+              <AppText role="label" color={colors.textMuted} style={styles.sectionLabel}>
+                {t('session.mode.switch.title')}
+              </AppText>
+              <SegmentedControl
+                options={[
+                  { value: 'single', label: t('playMode.single') },
+                  { value: 'multi', label: t('playMode.multi') },
+                ]}
+                value={currentPlayMode}
+                onChange={(v) => handleSwitchRequest(v as PlayMode)}
+              />
+            </View>
+
+            {/* Live segment breakdown */}
+            {liveSegmentPlans.length > 0 && (
+              <View style={styles.section}>
+                <AppText role="label" color={colors.textMuted} style={styles.sectionLabel}>
+                  {t('session.segments.title')}
+                </AppText>
+                <View style={styles.segmentList}>
+                  {liveSegmentPlans.map((plan, idx) => (
+                    <SegmentCard
+                      key={`${plan.started_at}-${idx}`}
+                      plan={plan}
+                      index={idx + 1}
+                      isLast={idx === liveSegmentPlans.length - 1}
+                    />
+                  ))}
+                </View>
+              </View>
+            )}
+          </>
+        )}
+
+        {/* ── Open-meter closed: segment summary ── */}
+        {billingMode === 'open' && isClosed && segments.length > 0 && (
+          <View style={styles.section}>
+            <AppText role="label" color={colors.textMuted} style={styles.sectionLabel}>
+              {t('session.segments.title')}
+            </AppText>
+            <View style={styles.segmentList}>
+              {segments.map((seg, idx) => (
+                <View
+                  key={seg.id}
+                  style={segStyles.row}
+                  accessible
+                  accessibilityRole="text"
+                >
+                  <View style={segStyles.left}>
+                    <AppText role="label" color={colors.textMuted}>
+                      {t('session.segments.label', {
+                        index: toArabicDigits(String(idx + 1)),
+                      })}
+                    </AppText>
+                    <AppText role="caption" color={colors.textMuted}>
+                      {toArabicDigits(localHm(seg.started_at))}
+                      {seg.ended_at ? ` — ${toArabicDigits(localHm(seg.ended_at))}` : ''}
+                    </AppText>
+                    <AppText role="micro" color={colors.textFaint}>
+                      {t('playMode.' + seg.play_mode)}
+                    </AppText>
+                  </View>
+                  <View style={segStyles.right}>
+                    <AppText role="caption" color={colors.textMuted}>
+                      {seg.price_per_hour_snapshot > 0
+                        ? t('rate.perHour', {
+                            rate: toArabicDigits(
+                              formatEgp(seg.price_per_hour_snapshot, false),
+                            ),
+                          })
+                        : t('rate.noRule')}
+                    </AppText>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* ── Fixed-match: match counter ── */}
+        {billingMode === 'fixed_match' && (
+          <View style={styles.section}>
+            <MatchCounter
+              sessionId={session.id}
+              tenantId={session.tenant_id}
+              matchCount={session.match_count ?? 0}
+              lockedPrice={segments[0]?.price_per_hour_snapshot ?? 0}
+              disabled={isClosed}
+            />
+          </View>
+        )}
+
+        {/* ── Prepaid: locked price reminder ── */}
+        {billingMode === 'prepaid' && (
+          <View style={styles.section}>
+            <View style={styles.prepaidCard}>
+              <AppText role="label" color={colors.textMuted}>
+                {t('session.start.prepaid.label')}
+              </AppText>
+              <AppText role="money" color={colors.primary} style={styles.prepaidAmount}>
+                {formatEgp(session.prepaid_total ?? 0)}
+              </AppText>
+              {session.prepaid_minutes != null && (
+                <AppText role="caption" color={colors.textFaint}>
+                  {toArabicDigits(String(session.prepaid_minutes))} {t('minutes')}
+                </AppText>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* Closed-session grand total summary */}
+        {isClosed && (
+          <View style={styles.closedSummary}>
+            <View style={styles.summaryRow}>
+              <AppText role="label" color={colors.textMuted}>
+                {t('session.close.timeCost')}
+              </AppText>
+              <AppText role="label" color={colors.text}>
+                {formatEgp(session.time_total)}
+              </AppText>
+            </View>
+            <View style={[styles.summaryRow, styles.summaryGrandTotal]}>
+              <AppText role="h3" color={colors.primary}>
+                {t('session.close.grandTotal')}
+              </AppText>
+              <AppText role="h3" color={colors.primary}>
+                {formatEgp(session.grand_total)}
+              </AppText>
+            </View>
+          </View>
+        )}
+
+        {/* Orders slot — Phase 5 */}
         {/* <OrdersSlot sessionId={session.id} /> */}
       </ScrollView>
 
-      {/* Close button — pinned above safe area */}
+      {/* Close button — pinned at the bottom, above safe area */}
       {!isClosed && (
         <View style={styles.footer}>
           <Button
             variant="primary"
             size="lg"
             fullWidth
-            onPress={() => setConfirmVisible(true)}
+            onPress={() => setConfirmCloseVisible(true)}
             accessibilityLabel={t('session.close.confirm')}
           >
             {t('session.close.confirm')}
@@ -266,21 +656,65 @@ export default function SessionDetailScreen() {
         </View>
       )}
 
-      {/* Confirm dialog — destructive friction */}
+      {/* ── Confirm: close session ── */}
       <ConfirmDialog
-        visible={confirmVisible}
+        visible={confirmCloseVisible}
         title={t('session.close.summary')}
-        body={`${formatEgp(liveTotalPiastres)}`}
+        body={formatEgp(displayTotal)}
         confirmLabel={t('session.close.confirm')}
         cancelLabel={t('action.cancel')}
-        onConfirm={handleCloseConfirm}
-        onCancel={() => setConfirmVisible(false)}
+        onConfirm={() => void handleCloseConfirm()}
+        onCancel={() => setConfirmCloseVisible(false)}
         loading={closing}
         destructive={false}
       />
+
+      {/* ── Confirm: switch play mode ── */}
+      <Sheet
+        visible={confirmSwitchVisible}
+        onClose={() => {
+          setConfirmSwitchVisible(false);
+          setPendingPlayMode(null);
+        }}
+        title={t('session.mode.switch.title')}
+      >
+        <AppText role="body" color={colors.textMuted}>
+          {t('session.mode.switch.description')}
+        </AppText>
+        {pendingPlayMode && (
+          <AppText role="label" color={colors.primary} align="center">
+            {/* ← RTL-correct: current ← new reads right-to-left as "new ← current" */}
+            {t('playMode.' + pendingPlayMode)} {'←'} {t('playMode.' + currentPlayMode)}
+          </AppText>
+        )}
+        <Button
+          variant="primary"
+          size="lg"
+          fullWidth
+          loading={switching}
+          onPress={() => void handleSwitchConfirm()}
+          accessibilityLabel={t('session.mode.switch.confirm')}
+        >
+          {t('session.mode.switch.confirm')}
+        </Button>
+        <Button
+          variant="ghost"
+          size="lg"
+          fullWidth
+          onPress={() => {
+            setConfirmSwitchVisible(false);
+            setPendingPlayMode(null);
+          }}
+          accessibilityLabel={t('action.cancel')}
+        >
+          {t('action.cancel')}
+        </Button>
+      </Sheet>
     </SafeAreaView>
   );
 }
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   screen: {
@@ -315,19 +749,71 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     paddingVertical: spacing['2xl'],
+    paddingHorizontal: spacing.xl,
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
   },
+  modeBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing['2xs'],
+    backgroundColor: colors.surface3,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
   total: {
-    fontSize: 32,
-    fontWeight: '700',
+    fontSize: 36,
+    fontWeight: '800' as const,
     fontVariant: ['tabular-nums'],
   },
   startedRow: {
     flexDirection: 'row',
     gap: spacing.sm,
+  },
+  section: {
+    gap: spacing.sm,
+  },
+  sectionLabel: {
+    paddingStart: spacing.xs,
+  },
+  segmentList: {
+    gap: spacing.xs,
+  },
+  prepaidCard: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.xl,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  prepaidAmount: {
+    fontSize: fontSize.h1,
+    fontWeight: fontWeight.h1,
+  },
+  closedSummary: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  summaryGrandTotal: {
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    marginTop: spacing.xs,
   },
   footer: {
     padding: spacing.xl,

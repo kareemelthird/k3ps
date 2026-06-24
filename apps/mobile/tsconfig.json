@@ -4,8 +4,25 @@
     "strict": true,
     "baseUrl": ".",
     "paths": {
-      "@ps/core": ["../../packages/core/src/index.ts"]
-    }
+      "@ps/core": [
+        "../../packages/core/src/index.ts"
+      ]
+    },
+    "incremental": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
   },
-  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.d.ts", "expo-env.d.ts"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.d.ts",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts",
+    ".next/types/**/*.ts"
+  ]
 }

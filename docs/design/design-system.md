@@ -10,16 +10,18 @@
 
 ---
 
-## 0. Scope vs. Phase 2
+## 0. Scope — the source of truth for every phase
 
-Phase 2 (Tenant Foundation) ships `@ps/core` + the multi-tenant backend — **no operational UI**. Per the
-spec hand-off (`docs/specs/phase-2-tenant-foundation.md` §7), the only surfaces this design must cover now
-are the **super-admin** flows the spec explicitly flags: **tenant provisioning** and **time-boxed, audited
-impersonation** (impersonation "must be visually unmistakable + audited"). Those live in
-`docs/design/super-admin-console.md` and `docs/design/impersonation.md`.
+This document is the **brand + system source of truth** for every surface. It landed first against the
+Phase 2 super-admin flows (`docs/design/super-admin-console.md`, `docs/design/impersonation.md`) and is the
+foundation every later phase composes against.
 
-Everything else here is the **foundation** every later phase (devices grid, sessions, owner dashboard)
-builds on, so it lands once, now, and stops the team from re-deriving tokens per feature.
+**Phase 3 (the walking skeleton)** is the first *operator-facing* slice and the first real test of the
+counter-speed, dark-first, RTL goals here: login → resolve tenant/branch from the JWT claim → device grid →
+start one open session → close it (live timer from `started_at`). It introduces the operator primitives
+(`DeviceCard`, `LiveTimer`, `BranchPicker`, `AppScaffold`) added in §9, with the full screen + state designs
+in **`docs/design/phase-3-walking-skeleton.md`**. No tokens, type, motion, or a11y rules are re-derived
+there — Phase 3 consumes this system verbatim.
 
 ---
 
@@ -321,6 +323,53 @@ Mobile = React Native; Web = shadcn/ui + Tailwind. Same tokens, same behavior.
 ### 9.9 `Skeleton`, `EmptyState`, `ErrorState`, `OfflineBanner`
 - Direct realizations of §8. `OfflineBanner` shows pending-write count and reconnect status; `ErrorState`
   always carries a retry. All respect RTL alignment and reduced-motion (skeleton shimmer disables).
+
+### 9.10 `LiveTimer` (operator — Phase 3)
+The one primitive that encodes `CLAUDE.md` §2.2: **never a `setInterval` elapsed counter** — it stores
+`startedAt` (UTC ISO) and recomputes from the clock each render.
+- **Props:** `startedAt` (ISO), `endedAt?` (ISO; when set the timer is frozen — closed session),
+  `format('clock'|'compact')`, `tickMs` (1000 on a detail screen, 15000–30000 on the grid),
+  `size('sm'|'md'|'lg')`.
+- **Behavior:** uses `elapsedSeconds(startedAt, endedAt)` + `formatClock` from `@ps/core`; a `useTick(tickMs)`
+  hook only forces re-render — it is **never** the source of the value. On background/foreground or network
+  loss the displayed value stays correct because it derives from `startedAt`.
+- **States:** running (live, `tickMs` re-render) · frozen (`endedAt` set, no tick) · `tickMs=null` disables
+  ticking for off-screen cards.
+- **RTL/a11y:** digits Arabic-Indic via `toArabicDigits`; **`timer` type role, tabular** so HH:MM:SS never
+  reflows; a clock is **not** directional — **do not mirror** it; `accessibilityLabel` reads the elapsed
+  duration in words, not the raw glyphs.
+
+### 9.11 `DeviceCard` (operator — Phase 3)
+The glanceable grid cell. Free vs busy is readable in under a second from across a counter.
+- **Props:** `name`, `deviceType('ps4'|'ps5'|'vip')`, `status('free'|'busy'|'maintenance')`,
+  `session?` ({ startedAt, runningTotalPiastres? }), `onPress`.
+- **Renders:** device name (`h3`) + a `StatusPill`; **free** = `status-free` 1px border + dot, body shows a
+  "tap to start" affordance; **busy** = `status-busy` border, a `LiveTimer` (grid `tickMs`), and the running
+  money via `formatEgp` in `money` role; **maintenance** = `status-maint`, muted, non-interactive.
+- **States:** the card itself carries the four screen-states via its parent grid (skeleton card, empty grid,
+  error, offline). Press feedback scale .97 <100ms (`scale-feedback`); busy dot uses the 1.2s opacity pulse
+  (reduced-motion disables).
+- **RTL/a11y:** min tap target ≥ 52 (whole card is the target); status by **pill + dot + border**, never
+  color alone; `accessibilityLabel` composes name + status + (busy) elapsed + total; money tabular.
+
+### 9.12 `BranchPicker` (operator — Phase 3)
+Selects the active branch within the resolved tenant; the app never renders data outside the active
+tenant/branch (`mobile-patterns.md`).
+- **Props:** `branches[]` ({ id, name }), `activeId`, `onSelect`, `variant('screen'|'switcher')`.
+- **`screen`** (post-login, when membership spans >1 branch): a full list of large rows (≥ 56),
+  one primary tap each. **`switcher`** (in the `AppScaffold` header): a compact control opening a `Sheet`/
+  `Dialog` list; single-branch members skip the screen and see a static label (no control).
+- **States:** all four (loading skeleton rows · empty "no branches assigned — contact your owner" · error +
+  retry · offline shows last-known list, selection queued).
+- **RTL/a11y:** rows align start; active branch shows a check at the **end** + `aria-current`/
+  `accessibilityState.selected`; chevron in `switcher` mirrors in RTL.
+
+### 9.13 `AppScaffold` (operator — Phase 3)
+The shared mobile shell: safe-area header (tenant/branch identity + branch switcher + sync dot), content
+slot, and the persistent `OfflineBanner`. Web owner-read reuses the same regions in a sidebar layout.
+- **Props:** `title`, `branchSwitcher?`, `online`, `pendingCount`, `children`, `headerEnd?` (actions slot).
+- **RTL/a11y:** header lays out start→end mirrored; identity at start, actions at end; respects top/bottom
+  safe areas and reserves space for the fixed `OfflineBanner` (`fixed-element-offset`, `safe-area-awareness`).
 
 ---
 

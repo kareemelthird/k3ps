@@ -3,7 +3,8 @@
  * Branch membership resolution. Tenant identity from JWT app_metadata claim only.
  */
 import { useQuery } from '@tanstack/react-query';
-import type { Branch } from '@ps/core';
+import type { BillingMode, Branch, PlayMode, RateRule } from '@ps/core';
+import { resolveRule } from '@ps/core';
 
 import { supabase } from '../../lib/supabase';
 
@@ -42,30 +43,69 @@ export async function signOut() {
   if (error) throw error;
 }
 
-/** Resolve the rate rule snapshot for open-meter sessions (minimal for Phase 3). */
+/**
+ * Fetch all active rate rules for the tenant and resolve the best one for the
+ * given context using @ps/core resolveRule (highest-priority, id tie-break,
+ * Cairo day-type + time window). Returns all rules so the caller can pass them
+ * to planSegments / boundary enumeration.
+ *
+ * Phase 4: replaces the Phase-3 resolveOpenRate single-query shortcut.
+ */
+export async function fetchAndResolveRule(
+  tenantId: string,
+  deviceType: string,
+  playMode: PlayMode,
+  billingMode: BillingMode,
+  atIso: string,
+): Promise<{
+  pricePerHour: number;
+  ruleId: string | null;
+  rule: RateRule | null;
+  allRules: RateRule[];
+}> {
+  const { data, error } = await supabase
+    .from('rate_rules')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('is_active', true)
+    .order('priority', { ascending: false });
+
+  if (error || !data) {
+    return { pricePerHour: 0, ruleId: null, rule: null, allRules: [] };
+  }
+
+  const allRules = data as RateRule[];
+  const rule = resolveRule(allRules, {
+    device_type: deviceType,
+    play_mode: playMode,
+    billing_mode: billingMode,
+    at_iso: atIso,
+  });
+
+  return {
+    pricePerHour: rule?.price_per_hour ?? 0,
+    ruleId: rule?.id ?? null,
+    rule: rule ?? null,
+    allRules,
+  };
+}
+
+/**
+ * Phase-3 compat: resolve the rate rule snapshot for open-meter sessions.
+ * @deprecated Use fetchAndResolveRule for Phase-4 multi-mode support.
+ */
 export async function resolveOpenRate(
   tenantId: string,
   deviceType: string,
   playMode: 'single' | 'multi',
   atIso: string,
 ): Promise<{ pricePerHour: number; ruleId: string | null }> {
-  // Minimal Phase-3 rule lookup: find highest-priority active open rule for this device_type
-  const { data } = await supabase
-    .from('rate_rules')
-    .select('id, price_per_hour, priority')
-    .eq('tenant_id', tenantId)
-    .eq('billing_mode', 'open')
-    .eq('is_active', true)
-    .in('device_type', [deviceType, 'any'])
-    .in('play_mode', [playMode, 'any'])
-    .order('priority', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (!data) return { pricePerHour: 0, ruleId: null };
-
-  return {
-    pricePerHour: (data.price_per_hour as number | null) ?? 0,
-    ruleId: data.id as string,
-  };
+  const result = await fetchAndResolveRule(
+    tenantId,
+    deviceType,
+    playMode,
+    'open',
+    atIso,
+  );
+  return { pricePerHour: result.pricePerHour, ruleId: result.ruleId };
 }

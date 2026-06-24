@@ -4,13 +4,14 @@
  * never accidentally read outside the active tenant/branch).
  * Mutations use client-generated UUIDs + upsert (idempotent).
  *
- * BLOCKER (Phase 3): offline outbox is deferred to Phase 8. Enqueue calls are
- * removed; all writes are direct (idempotent upsert with onConflict:'id').
- * outbox.ts stays in place (reserved for Phase 8) but nothing calls enqueue here.
+ * Phase 4: useStartSession extended for all billing modes (open/prepaid/fixed_match).
+ *
+ * BLOCKER (Phase 3): offline outbox is deferred to Phase 8. All writes are
+ * direct (idempotent upsert with onConflict:'id').
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { nowIso, uuidv4 } from '@ps/core';
-import type { Device, PlayMode, Session } from '@ps/core';
+import type { BillingMode, Device, PlayMode, Session } from '@ps/core';
 
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../stores/useAuth';
@@ -76,13 +77,23 @@ export function useActiveSessions(
 export interface StartSessionInput {
   deviceId: string;
   playMode: PlayMode;
+  billingMode: BillingMode;
   tenantId: string;
   branchId: string;
   managerId: string;
-  /** Snapshot rate in piastres (from matched rate rule or 0 for skeleton). */
+  /** Snapshot rate in piastres (from matched rate rule or 0 for no-rule). */
   pricePerHourSnapshot: number;
-  /** Rate rule id if resolved; null for skeleton. */
+  /** Rate rule id if resolved; null if no matching rule. */
   rateRuleId: string | null;
+  /**
+   * For prepaid: the locked total in piastres (captured at purchase, never
+   * re-computed from rules — ADR-0005 Decision 6, AC 14–16).
+   */
+  prepaidTotal?: number | null;
+  /** For prepaid: advisory display minutes (does not affect billing). */
+  prepaidMinutes?: number | null;
+  /** For fixed_match: initial match count (normally 0). */
+  matchCount?: number;
 }
 
 export function useStartSession() {
@@ -101,9 +112,20 @@ export function useStartSession() {
         branch_id: input.branchId,
         device_id: input.deviceId,
         manager_id: input.managerId,
-        billing_mode: 'open',
+        billing_mode: input.billingMode,
         status: 'active',
         started_at: startedAt,
+        // For prepaid: lock prepaid_total at purchase (AC 34 / Decision 6).
+        prepaid_total: input.billingMode === 'prepaid'
+          ? (input.prepaidTotal ?? null)
+          : null,
+        prepaid_minutes: input.billingMode === 'prepaid'
+          ? (input.prepaidMinutes ?? null)
+          : null,
+        // For fixed_match: track match_count on the session row.
+        match_count: input.billingMode === 'fixed_match'
+          ? (input.matchCount ?? 0)
+          : null,
         time_total: 0,
         orders_total: 0,
         grand_total: 0,
@@ -111,6 +133,9 @@ export function useStartSession() {
         updated_at: nowIso(),
       };
 
+      // First session_segments row: snapshots the resolved rule at start.
+      // For fixed_match: price_per_hour_snapshot re-purposed as the locked
+      // per-match price (ADR-0005 Decision 7).
       const segment: AnyRow = {
         id: segmentId,
         tenant_id: input.tenantId,
@@ -119,10 +144,13 @@ export function useStartSession() {
         rate_rule_id: input.rateRuleId,
         price_per_hour_snapshot: input.pricePerHourSnapshot,
         started_at: startedAt,
+        // For prepaid and fixed_match the segment has no open end (they don't
+        // have time-based open segments). For open-meter, ended_at stays null.
+        ended_at: input.billingMode === 'open' ? null : startedAt,
         updated_at: nowIso(),
       };
 
-      // Direct idempotent writes (Phase 3). Outbox deferred to Phase 8.
+      // Direct idempotent writes (Phase 3/4). Outbox deferred to Phase 8.
       const { error: sessionErr } = await supabase
         .from('sessions')
         .upsert(session, { onConflict: 'id' });
@@ -159,6 +187,10 @@ export interface CloseSessionInput {
   endedAt: string;
 }
 
+/**
+ * Phase-3 compatible close (used by legacy session screen path).
+ * Phase-4 replaces this with useCloseSessionPhase4 in session/api.ts.
+ */
 export function useCloseSession() {
   const qc = useQueryClient();
   const { claim } = useAuth();
@@ -181,7 +213,6 @@ export function useCloseSession() {
         created_at: now,
       };
 
-      // Direct idempotent writes (Phase 3). Outbox deferred to Phase 8.
       const { error: closeErr } = await supabase
         .from('sessions')
         .update({
@@ -195,7 +226,6 @@ export function useCloseSession() {
         .eq('tenant_id', input.tenantId);
       if (closeErr) throw closeErr;
 
-      // SHOULD-FIX: upsert (not insert) — idempotent on replay (onConflict:'id')
       await supabase
         .from('audit_log')
         .upsert(auditRow, { onConflict: 'id' });
