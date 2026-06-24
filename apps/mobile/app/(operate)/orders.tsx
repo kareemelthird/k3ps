@@ -290,20 +290,22 @@ export default function OrdersScreen() {
     return m;
   }, [stockLevels]);
 
-  // ── Category list ──
+  // ── Category list (NIT 5: chip value and filter predicate use the same
+  //    raw category string; blank-category products are excluded from chips
+  //    since '' is the sentinel for "All") ──
   const categories = useMemo(() => {
     const cats = new Set<string>();
-    (products ?? []).forEach((p) => cats.add(p.category || t('orders.emptyProducts.title')));
+    (products ?? []).forEach((p) => {
+      if (p.category) cats.add(p.category);
+    });
     return ['', ...Array.from(cats)];
-  }, [products, t]);
+  }, [products]);
 
   const [selectedCategory, setSelectedCategory] = useState('');
 
   const filteredProducts = useMemo(() => {
     if (!selectedCategory) return products ?? [];
-    return (products ?? []).filter(
-      (p) => (p.category || '') === selectedCategory,
-    );
+    return (products ?? []).filter((p) => p.category === selectedCategory);
   }, [products, selectedCategory]);
 
   // ── Cart total ──
@@ -485,6 +487,7 @@ export default function OrdersScreen() {
                   role="caption"
                   color={selectedCategory === cat ? colors.onPrimary : colors.textMuted}
                 >
+                  {/* '' sentinel = "All products" chip; non-empty = raw category */}
                   {cat || t('orders.title')}
                 </AppText>
               </Pressable>

@@ -307,3 +307,55 @@ export function useCloseShift() {
     },
   });
 }
+
+// ─── Query: cash sales for an open shift (for pre-close expected_cash display) ──
+
+/**
+ * Fetches the cash_sales total for a given shift ID — same query used inside
+ * useCloseShift but surfaced as a live query so CloseShiftForm can show the
+ * expected_cash (= opening_cash + cash_sales) BEFORE the operator submits.
+ *
+ * Spec AC 26: show expected so the operator can count against a known target.
+ * Polled every 30 s; exact match to the close math (same filter as useCloseShift).
+ */
+export function useShiftCashSales(
+  shiftId: string | null | undefined,
+  tenantId: string | null,
+  branchId: string | null,
+): { cashSales: Piastres; isLoading: boolean } {
+  const result = useQuery({
+    queryKey: ['shift_cash_sales', shiftId ?? '', tenantId ?? '', branchId ?? ''],
+    enabled: Boolean(shiftId && tenantId && branchId),
+    staleTime: 30_000,
+    queryFn: async (): Promise<Piastres> => {
+      const [{ data: sessions, error: sessErr }, { data: orders, error: ordErr }] =
+        await Promise.all([
+          supabase
+            .from('sessions')
+            .select('grand_total')
+            .eq('tenant_id', tenantId)
+            .eq('branch_id', branchId)
+            .eq('shift_id', shiftId)
+            .eq('status', 'closed')
+            .eq('payment_method', 'cash'),
+          supabase
+            .from('orders')
+            .select('total')
+            .eq('tenant_id', tenantId)
+            .eq('branch_id', branchId)
+            .eq('shift_id', shiftId)
+            .eq('status', 'paid')
+            .eq('payment_method', 'cash')
+            .is('session_id', null),
+        ]);
+      if (sessErr) throw sessErr;
+      if (ordErr) throw ordErr;
+
+      let cashSales: Piastres = 0;
+      for (const s of sessions ?? []) cashSales += s.grand_total ?? 0;
+      for (const o of orders ?? []) cashSales += o.total ?? 0;
+      return cashSales;
+    },
+  });
+  return { cashSales: result.data ?? 0, isLoading: result.isLoading };
+}

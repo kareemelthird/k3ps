@@ -21,7 +21,7 @@
  *   - Cairo TZ via localHm/formatClock.
  *   - All strings via t('key'), Arabic-Indic numerals via toArabicDigits/formatEgp.
  */
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Pressable,
   SafeAreaView,
@@ -59,6 +59,17 @@ import {
 } from '../../../src/features/session/api';
 import { useAuth } from '../../../src/stores/useAuth';
 import { useOpenShift } from '../../../src/features/shifts/api';
+import {
+  useProducts,
+  useStockLevels,
+  useSessionOrders,
+  useAddOrder,
+  useVoidOrderItem,
+  isProductTracked,
+  type ProductRow,
+  type OrderItemRow,
+  type OrderRow,
+} from '../../../src/features/orders/api';
 import { supabase } from '../../../src/lib/supabase';
 import { colors, spacing, radius, fontSize, fontWeight, TAP_TARGET } from '../../../src/design/tokens';
 import { AppText } from '../../../src/components/AppText';
@@ -230,6 +241,407 @@ const ctrStyles = StyleSheet.create({
   },
 });
 
+// ─── Sub-component: Session-attached order slot ───────────────────────────────
+//
+// Allows adding catalog products to the ACTIVE session (not a walk-in).
+// Wires useSessionOrders + useAddOrder (sessionId = this session) + useVoidOrderItem.
+// Calls _syncSessionOrdersTotal after each add/void so sessions.orders_total
+// stays in sync and is included in the live grand_total.
+
+interface SessionOrdersSlotProps {
+  sessionId: string;
+  tenantId: string;
+  branchId: string;
+  managerId: string;
+  shiftId: string | null;
+  isClosed: boolean;
+}
+
+function SessionOrdersSlot({
+  sessionId,
+  tenantId,
+  branchId,
+  managerId,
+  shiftId,
+  isClosed,
+}: SessionOrdersSlotProps) {
+  const { t } = useTranslation();
+
+  const { data: products } = useProducts(tenantId);
+  const { data: stockLevels } = useStockLevels(tenantId, branchId);
+  const { data: sessionOrdersData } = useSessionOrders(sessionId, tenantId);
+  const { mutateAsync: addOrder, isPending: addingOrder } = useAddOrder();
+  const { mutateAsync: voidItem, isPending: voidingItem } = useVoidOrderItem();
+
+  // cart: productId → qty
+  const [cart, setCart] = useState<Map<string, number>>(new Map());
+  const [addError, setAddError] = useState<string | null>(null);
+  const [slotExpanded, setSlotExpanded] = useState(false);
+
+  const stockMap = useMemo(() => {
+    const m = new Map<string, number>();
+    (stockLevels ?? []).forEach((sl) => m.set(sl.product_id, sl.on_hand));
+    return m;
+  }, [stockLevels]);
+
+  const productMap = useMemo(() => {
+    const m = new Map<string, ProductRow>();
+    (products ?? []).forEach((p) => m.set(p.id, p));
+    return m;
+  }, [products]);
+
+  // Cart total (integer piastres — no inline money math; we sum qty*price here
+  // which is the same operation computeOrderTotal does but without the is_void
+  // filter — fine because cart items are never pre-voided)
+  const cartTotal = useMemo(() => {
+    let total = 0;
+    cart.forEach((qty, productId) => {
+      const p = productMap.get(productId);
+      if (p && qty > 0) total += qty * p.price;
+    });
+    return total;
+  }, [cart, productMap]);
+
+  const existingOrders = sessionOrdersData?.orders ?? [];
+  const ordersTotal = sessionOrdersData?.ordersTotal ?? 0;
+
+  const handleAddToCart = (product: ProductRow) => {
+    setCart((prev) => {
+      const next = new Map(prev);
+      next.set(product.id, (next.get(product.id) ?? 0) + 1);
+      return next;
+    });
+  };
+
+  const handleRemoveFromCart = (productId: string) => {
+    setCart((prev) => {
+      const next = new Map(prev);
+      const current = next.get(productId) ?? 0;
+      if (current <= 1) next.delete(productId);
+      else next.set(productId, current - 1);
+      return next;
+    });
+  };
+
+  const handleSubmitOrder = async () => {
+    if (cart.size === 0) return;
+    setAddError(null);
+    const items: { productId: string; unitPrice: number; qty: number }[] = [];
+    cart.forEach((qty, productId) => {
+      const p = productMap.get(productId);
+      if (p && qty > 0) items.push({ productId, unitPrice: p.price, qty });
+    });
+    try {
+      await addOrder({
+        sessionId,
+        tenantId,
+        branchId,
+        managerId,
+        shiftId,
+        items,
+      });
+      setCart(new Map());
+    } catch {
+      setAddError(t('orders.error.addFailed'));
+    }
+  };
+
+  const handleVoidItem = async (
+    order: OrderRow & { items: OrderItemRow[] },
+    item: OrderItemRow,
+  ) => {
+    const product = productMap.get(item.product_id);
+    try {
+      await voidItem({
+        itemId: item.id,
+        orderId: order.id,
+        sessionId,
+        tenantId,
+        branchId,
+        managerId,
+        qty: item.qty,
+        unitPrice: item.unit_price,
+        productId: item.product_id,
+        productIsTracked: isProductTracked(product?.stock ?? null),
+        orderStatus: order.status,
+      });
+    } catch {
+      // void errors are silent — user sees stale data until refetch
+    }
+  };
+
+  const hasItems = existingOrders.some((o) => o.items.some((i) => !i.is_void));
+
+  return (
+    <View style={slotStyles.container}>
+      {/* Section header — tap to expand/collapse the order builder */}
+      <Pressable
+        onPress={() => setSlotExpanded((v) => !v)}
+        style={slotStyles.header}
+        accessibilityRole="button"
+        accessibilityLabel={t('orders.attachSession')}
+        accessibilityState={{ expanded: slotExpanded }}
+      >
+        <AppText role="label" color={colors.textMuted}>
+          {t('orders.attachSession')}
+        </AppText>
+        <View style={slotStyles.headerRight}>
+          {ordersTotal > 0 && (
+            <AppText role="label" color={colors.primary}>
+              {formatEgp(ordersTotal)}
+            </AppText>
+          )}
+          <AppText role="label" color={colors.textMuted}>
+            {slotExpanded ? '▲' : '▼'}
+          </AppText>
+        </View>
+      </Pressable>
+
+      {slotExpanded && (
+        <View style={slotStyles.body}>
+          {/* Existing session order lines */}
+          {hasItems && (
+            <View style={slotStyles.existingOrders}>
+              {existingOrders.map((order) =>
+                order.items
+                  .filter((i) => !i.is_void)
+                  .map((item) => {
+                    const p = productMap.get(item.product_id);
+                    return (
+                      <View key={item.id} style={slotStyles.lineRow}>
+                        <View style={slotStyles.lineLeft}>
+                          <AppText role="body">
+                            {p?.name ?? item.product_id}
+                          </AppText>
+                          <AppText role="caption" color={colors.textMuted}>
+                            {toArabicDigits(String(item.qty))} × {formatEgp(item.unit_price)}
+                          </AppText>
+                        </View>
+                        <View style={slotStyles.lineRight}>
+                          <AppText role="label" color={colors.primary}>
+                            {formatEgp(item.qty * item.unit_price)}
+                          </AppText>
+                          {!isClosed && (
+                            <Pressable
+                              onPress={() => void handleVoidItem(order, item)}
+                              disabled={voidingItem}
+                              style={slotStyles.voidBtn}
+                              accessibilityRole="button"
+                              accessibilityLabel={t('orders.void.title')}
+                              hitSlop={8}
+                            >
+                              <AppText role="caption" color={colors.danger}>
+                                {t('orders.void.title')}
+                              </AppText>
+                            </Pressable>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })
+              )}
+              <View style={slotStyles.subtotalRow}>
+                <AppText role="label" color={colors.textMuted}>
+                  {t('orders.total')}
+                </AppText>
+                <AppText role="h3" color={colors.primary}>
+                  {formatEgp(ordersTotal)}
+                </AppText>
+              </View>
+            </View>
+          )}
+
+          {/* Product grid — only shown when session is open */}
+          {!isClosed && (
+            <>
+              <View style={slotStyles.productGrid}>
+                {(products ?? []).map((product) => {
+                  const qty = cart.get(product.id) ?? 0;
+                  return (
+                    <Pressable
+                      key={product.id}
+                      style={({ pressed }) => [
+                        slotStyles.productChip,
+                        pressed && slotStyles.productChipPressed,
+                      ]}
+                      onPress={() => handleAddToCart(product)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${product.name} — ${formatEgp(product.price)}`}
+                    >
+                      <AppText role="caption" numberOfLines={1}>
+                        {product.name}
+                      </AppText>
+                      <AppText role="micro" color={colors.primary}>
+                        {formatEgp(product.price)}
+                      </AppText>
+                      {qty > 0 && (
+                        <View style={slotStyles.qtyBadge}>
+                          <AppText role="micro" color={colors.onPrimary}>
+                            {toArabicDigits(String(qty))}
+                          </AppText>
+                        </View>
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* Cart preview + submit */}
+              {cart.size > 0 && (
+                <View style={slotStyles.cartPreview}>
+                  {Array.from(cart.entries())
+                    .filter(([, qty]) => qty > 0)
+                    .map(([productId, qty]) => {
+                      const p = productMap.get(productId);
+                      if (!p) return null;
+                      return (
+                        <View key={productId} style={slotStyles.lineRow}>
+                          <AppText role="caption">{p.name}</AppText>
+                          <View style={slotStyles.lineRight}>
+                            <AppText role="caption" color={colors.primary}>
+                              {formatEgp(qty * p.price)}
+                            </AppText>
+                            <Pressable
+                              onPress={() => handleRemoveFromCart(productId)}
+                              style={slotStyles.voidBtn}
+                              accessibilityRole="button"
+                              accessibilityLabel={t('orders.void.title')}
+                              hitSlop={8}
+                            >
+                              <AppText role="micro" color={colors.danger}>{'−'}</AppText>
+                            </Pressable>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  <View style={slotStyles.subtotalRow}>
+                    <AppText role="label" color={colors.textMuted}>
+                      {t('orders.total')}
+                    </AppText>
+                    <AppText role="label" color={colors.primary}>
+                      {formatEgp(cartTotal)}
+                    </AppText>
+                  </View>
+                  {addError && (
+                    <View accessibilityRole="alert" accessible>
+                      <AppText role="caption" color={colors.danger}>{addError}</AppText>
+                    </View>
+                  )}
+                  <Button
+                    variant="primary"
+                    size="md"
+                    fullWidth
+                    loading={addingOrder}
+                    onPress={() => void handleSubmitOrder()}
+                    accessibilityLabel={t('orders.addItem')}
+                  >
+                    {t('orders.addItem')}
+                  </Button>
+                </View>
+              )}
+            </>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
+const slotStyles = StyleSheet.create({
+  container: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    minHeight: TAP_TARGET,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  body: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  existingOrders: {
+    gap: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing.xs,
+  },
+  lineRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing['2xs'],
+  },
+  lineLeft: {
+    flex: 1,
+    gap: 2,
+  },
+  lineRight: {
+    alignItems: 'flex-end',
+    gap: 2,
+  },
+  subtotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  voidBtn: {
+    minHeight: 28,
+    justifyContent: 'center',
+  },
+  productGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  productChip: {
+    backgroundColor: colors.surface2,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    minWidth: 80,
+    gap: 2,
+    position: 'relative',
+  },
+  productChipPressed: {
+    backgroundColor: colors.surface3,
+  },
+  qtyBadge: {
+    position: 'absolute',
+    top: -4,
+    start: -4,
+    backgroundColor: colors.primary,
+    borderRadius: radius.pill,
+    width: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cartPreview: {
+    gap: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing.sm,
+  },
+});
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function SessionDetailScreen() {
@@ -322,8 +734,14 @@ export default function SessionDetailScreen() {
       liveTotalPiastres = grandTotal;
       liveSegmentPlans = segmentPlans;
     } else if (billingMode === 'prepaid') {
-      liveTotalPiastres = computePrepaidCost({
-        prepaid_total: session.prepaid_total ?? null,
+      // SHOULD-FIX 6: wrap in computeGrandTotal so live total includes
+      // orders_total + discount, matching the close math exactly.
+      liveTotalPiastres = computeGrandTotal({
+        time_total: computePrepaidCost({
+          prepaid_total: session.prepaid_total ?? null,
+        }),
+        orders_total: session.orders_total ?? 0,
+        discount: session.discount ?? 0,
       });
     } else if (billingMode === 'fixed_match') {
       const firstSeg = segments[0];
@@ -668,8 +1086,17 @@ export default function SessionDetailScreen() {
           </View>
         )}
 
-        {/* Orders slot — Phase 5 */}
-        {/* <OrdersSlot sessionId={session.id} /> */}
+        {/* Orders slot — Phase 5 (SHOULD-FIX 1: wired session-attached order UI) */}
+        <View style={styles.section}>
+          <SessionOrdersSlot
+            sessionId={session.id}
+            tenantId={session.tenant_id}
+            branchId={session.branch_id}
+            managerId={user?.id ?? ''}
+            shiftId={openShiftData?.id ?? null}
+            isClosed={isClosed}
+          />
+        </View>
       </ScrollView>
 
       {/* Close button — pinned at the bottom, above safe area.

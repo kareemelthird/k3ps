@@ -26,6 +26,7 @@ import { useTranslation } from 'react-i18next';
 
 import {
   businessDayKey,
+  computeShiftReconciliation,
   egpToPiastres,
   formatEgp,
   localHm,
@@ -37,6 +38,7 @@ import {
   useOpenShift,
   useOpenShift_mutation,
   useCloseShift,
+  useShiftCashSales,
   type ShiftRow,
 } from '../../src/features/shifts/api';
 import { useAuth } from '../../src/stores/useAuth';
@@ -113,11 +115,14 @@ function OpenShiftCard({
 
 function CloseShiftForm({
   shift,
+  expectedCash,
   onSubmit,
   loading,
   error,
 }: {
   shift: ShiftRow;
+  /** Pre-computed expected_cash shown BEFORE submit (spec AC 26). */
+  expectedCash: Piastres;
   onSubmit: (params: { countedCash: Piastres; notes: string }) => void;
   loading: boolean;
   error: string | null;
@@ -126,17 +131,33 @@ function CloseShiftForm({
   const [countedEgp, setCountedEgp] = useState('');
   const [notes, setNotes] = useState('');
 
-  const handleSubmit = () => {
+  const countedPiastres = (() => {
     const egp = parseFloat(countedEgp.replace(',', '.'));
-    if (isNaN(egp) || egp < 0) return;
+    return isNaN(egp) || egp < 0 ? null : egpToPiastres(egp);
+  })();
+
+  // Live difference shown as the operator types (before submit).
+  // computeShiftReconciliation from @ps/core keeps the math authoritative.
+  const liveDiff =
+    countedPiastres !== null
+      ? computeShiftReconciliation({
+          opening_cash: shift.opening_cash,
+          cash_sales: expectedCash - shift.opening_cash, // cash_sales = expected - opening
+          counted_cash: countedPiastres,
+        }).difference
+      : null;
+
+  const handleSubmit = () => {
+    if (countedPiastres === null) return;
     onSubmit({
-      countedCash: egpToPiastres(egp),
+      countedCash: countedPiastres,
       notes,
     });
   };
 
   return (
     <View style={styles.closeForm}>
+      {/* Opening cash */}
       <View style={styles.shiftRow}>
         <AppText role="label" color={colors.textMuted}>
           {t('shift.open.openingCash')}
@@ -146,6 +167,17 @@ function CloseShiftForm({
         </AppText>
       </View>
 
+      {/* Expected cash — shown BEFORE submit (spec AC 26) */}
+      <View style={styles.shiftRow}>
+        <AppText role="label" color={colors.textMuted}>
+          {t('shift.close.expectedCash')}
+        </AppText>
+        <AppText role="label" color={colors.primary}>
+          {formatEgp(expectedCash)}
+        </AppText>
+      </View>
+
+      {/* Counted cash input */}
       <AppText role="label" color={colors.textMuted}>
         {t('shift.close.countedCash')}
       </AppText>
@@ -158,6 +190,27 @@ function CloseShiftForm({
         keyboardType="decimal-pad"
         accessibilityLabel={t('shift.close.countedCash')}
       />
+
+      {/* Live difference — visible while operator types */}
+      {liveDiff !== null && (
+        <View style={[styles.shiftRow, styles.liveDiffRow]}>
+          <AppText role="label" color={colors.textMuted}>
+            {t('shift.close.difference')}
+          </AppText>
+          <AppText
+            role="label"
+            color={
+              liveDiff > 0
+                ? colors.statusFree
+                : liveDiff < 0
+                ? colors.danger
+                : colors.primary
+            }
+          >
+            {liveDiff >= 0 ? '' : '−'}{formatEgp(Math.abs(liveDiff))}
+          </AppText>
+        </View>
+      )}
 
       <AppText role="label" color={colors.textMuted}>
         {t('shift.close.notes')}
@@ -270,6 +323,21 @@ export default function ShiftScreen() {
   const { mutateAsync: doOpenShift, isPending: openingShift } = useOpenShift_mutation();
   const { mutateAsync: doCloseShift, isPending: closingShift } = useCloseShift();
 
+  // Pre-close cash_sales — same query used inside useCloseShift, surfaced here
+  // so CloseShiftForm can display expected_cash BEFORE the operator submits.
+  const { cashSales: preCloseCashSales } = useShiftCashSales(
+    openShift?.id,
+    tenantId,
+    branchId,
+  );
+  const preCloseExpectedCash = openShift
+    ? computeShiftReconciliation({
+        opening_cash: openShift.opening_cash,
+        cash_sales: preCloseCashSales,
+        counted_cash: 0, // not used — we only need expected_cash
+      }).expected_cash
+    : 0;
+
   // ── Open shift sheet state ──
   const [openSheetVisible, setOpenSheetVisible] = useState(false);
   const [openingCashEgp, setOpeningCashEgp] = useState('');
@@ -297,7 +365,7 @@ export default function ShiftScreen() {
       setOpenError(t('shift.open.openingCash'));
       return;
     }
-    const openingCash = eggToPiastres(egp);
+    const openingCash = egpToPiastres(egp);
 
     try {
       await doOpenShift({
@@ -352,11 +420,6 @@ export default function ShiftScreen() {
       setCloseError(t('shift.error.closeFailed'));
     }
   };
-
-  // ── Import egpToPiastres directly (not a hook) ──
-  function eggToPiastres(egp: number): Piastres {
-    return egpToPiastres(egp);
-  }
 
   // ── Render ──
   if (isLoading) {
@@ -498,6 +561,7 @@ export default function ShiftScreen() {
         {openShift && (
           <CloseShiftForm
             shift={openShift}
+            expectedCash={preCloseExpectedCash}
             onSubmit={handleCloseShift}
             loading={closingShift}
             error={closeError}
@@ -578,6 +642,11 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
     marginTop: spacing.xs,
+  },
+  liveDiffRow: {
+    backgroundColor: colors.surface2,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.xs,
   },
   input: {
     backgroundColor: colors.surface3,

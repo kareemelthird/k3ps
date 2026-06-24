@@ -30,6 +30,7 @@ import {
   formatEgp,
   isTracked,
   nowIso,
+  offsettingVoids,
   PS_UUID_NS,
   stockStatus,
   uuidv4,
@@ -349,8 +350,12 @@ export interface VoidOrderItemInput {
   qty: number;
   unitPrice: Piastres;
   productId: string;
-  /** If the product is tracked and the order is paid, write a void stock movement. */
-  productIsTracked: boolean;
+  /**
+   * @deprecated Pass-through kept for existing callers; no longer drives
+   * void stock logic. Stock reversal now queries the RECORDED sale movements
+   * (see SHOULD-FIX 2+3).
+   */
+  productIsTracked?: boolean;
   orderStatus: 'open' | 'paid' | 'void';
 }
 
@@ -433,29 +438,50 @@ export function useVoidOrderItem() {
         );
       if (auditErr) throw auditErr;
 
-      // 5. Stock void offset — only if the order is already paid and the product
-      //    is tracked (Decision 4: movement written at paid-time, so void must
-      //    reverse at void-time, not at open-order-void-time).
-      if (input.orderStatus === 'paid' && input.productIsTracked) {
-        const movementId = uuidv5(`stock-void:${input.itemId}`, PS_UUID_NS);
-        const { error: mvErr } = await supabase
+      // 5. Stock void offset — driven by the RECORDED sale movements for this
+      //    order_item, not the product's current tracked flag (SHOULD-FIX 2+3).
+      //    Query stock_movements where reason='sale' and order_id=input.orderId
+      //    and product_id=input.productId. Use offsettingVoids(@ps/core) to
+      //    compute the exact reversals. Movement ids are deterministic uuidv5
+      //    keyed from the original sale movement id → idempotent on retry.
+      //
+      //    This ensures Σ(sale)+Σ(void)=0 regardless of the current tracked flag:
+      //    if a product was tracked at sale but untracked later, the sale movements
+      //    still exist and the void will still reverse them.
+      if (input.orderStatus === 'paid') {
+        const { data: saleMoves, error: saleMovErr } = await supabase
           .from('stock_movements')
-          .upsert(
-            {
-              id: movementId,
-              tenant_id: input.tenantId,
-              branch_id: input.branchId,
-              product_id: input.productId,
-              delta: input.qty, // positive = restock on void
-              reason: 'void',
-              order_id: input.orderId,
-              manager_id: input.managerId,
-              note: null,
-              created_at: now,
-            },
-            { onConflict: 'id' },
+          .select('id, product_id, delta')
+          .eq('tenant_id', input.tenantId)
+          .eq('order_id', input.orderId)
+          .eq('product_id', input.productId)
+          .eq('reason', 'sale');
+        if (saleMovErr) throw saleMovErr;
+
+        if (saleMoves && saleMoves.length > 0) {
+          // offsettingVoids negates each delta (sale=-qty → void=+qty).
+          const voidDeltas = offsettingVoids(
+            saleMoves.map((m) => ({ product_id: m.product_id, delta: m.delta })),
           );
-        if (mvErr) throw mvErr;
+          const voidRows = voidDeltas.map((v, idx) => ({
+            // Deterministic id: keyed from the original sale movement id so
+            // retrying this void writes the same row (upsert is idempotent).
+            id: uuidv5(`stock-void:${saleMoves[idx]!.id}`, PS_UUID_NS),
+            tenant_id: input.tenantId,
+            branch_id: input.branchId,
+            product_id: v.product_id,
+            delta: v.delta,
+            reason: 'void' as const,
+            order_id: input.orderId,
+            manager_id: input.managerId,
+            note: null,
+            created_at: now,
+          }));
+          const { error: mvErr } = await supabase
+            .from('stock_movements')
+            .upsert(voidRows, { onConflict: 'id' });
+          if (mvErr) throw mvErr;
+        }
       }
 
       return { newTotal };
