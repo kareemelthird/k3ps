@@ -16,3 +16,31 @@ export {
   billableMinutes,
   openMeterCostPiastres,
 } from './open-meter';
+
+// Phase 4 — rate-rule resolution + boundary enumeration (ADR-0005).
+export {
+  type RuleContext,
+  type BoundaryContext,
+  type SegmentPlan,
+  ruleMatches,
+  resolveRule,
+  rateBoundaryInstants,
+  planSegments,
+} from './rate-rules';
+
+// Phase 4 — session cost aggregation (open / prepaid / fixed-match / grand
+// total / snapshot reconstruction).
+export {
+  type SegmentCostInput,
+  type OpenMeterModifiers,
+  type OpenMeterTotal,
+  type PrepaidCostInput,
+  type FixedMatchCostInput,
+  type GrandTotalInput,
+  type ReconstructInput,
+  aggregateOpenMeter,
+  computePrepaidCost,
+  computeFixedMatchCost,
+  computeGrandTotal,
+  reconstructTimeCost,
+} from './session-cost';

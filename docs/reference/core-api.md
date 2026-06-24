@@ -86,6 +86,38 @@ totalOutstanding(list): number
 ## Domain enums (port from `src/lib/types.ts`)
 `Role` owner|manager (NEW: super_admin) · `PermissionKey` restock|void|manageDebts|discount · `DeviceStatus` free|busy|maintenance · `PlayMode` single|multi (+`'any'` for rules) · `BillingMode` open|prepaid|fixed_match · `DayTypeRule` weekday|weekend|any · `SessionStatus` active|closed|void · `PaymentMethod` cash|wallet|other|debt · `OrderStatus` open|paid|void · `StockReason` initial|restock|adjust|sale|void · `ShiftStatus` open|closed.
 
+## Phase-4 pricing engine (LOCKED — see [ADR-0005](../adr/0005-pricing-engine-segments-and-boundaries.md))
+
+The Phase-4 surface added under `packages/core/src/pricing` (re-exported from the root). Decisions: live **preview-splits / close-materializes** (no money-bearing mobile tick); boundaries split on resolved **`rate_rule_id`**; boundaries are **derived from the rule set** (no `peak_windows`); min-charge **once at session level at the first segment's rate**; rate-rule changes are **audited** (`rate_rule.create|update|deactivate|reactivate`, `amount=null`); prepaid `prepaid_minutes` is **advisory only** (price lock is the invariant); fixed-match price is **locked at start on the first segment's `price_per_hour_snapshot`**.
+
+```ts
+// resolution
+interface RuleContext { device_type: string; play_mode: PlayMode; billing_mode: BillingMode; at_iso: string }
+ruleMatches(rule: RateRule, ctx: RuleContext): boolean
+resolveRule(rules: RateRule[], ctx: RuleContext): RateRule | null   // highest priority; id tie-break; null = no rule (rate 0)
+
+// boundaries (no peak_windows; derived from rules — ADR-0005 algorithm)
+interface BoundaryContext { device_type: string; play_mode: PlayMode; billing_mode: BillingMode }
+rateBoundaryInstants(rules, ctx, startIso, endIso): string[]        // ascending UTC ISO, strictly inside (start,end); split on rule-id change
+interface SegmentPlan { started_at; ended_at; play_mode: PlayMode; rate_rule_id: string|null; price_per_hour_snapshot: Piastres }
+planSegments(rules, ctx, startIso, endIso): SegmentPlan[]           // boundaries.length+1 plans; snapshot resolved at each sub-interval start
+
+// open-meter aggregator (round once per segment; min-charge once @ first rate; never re-round the sum)
+interface SegmentCostInput { price_per_hour: Piastres; started_at: string; ended_at: string }   // open seg → ended_at = at_iso
+interface OpenMeterModifiers { rounding_minutes: number; min_charge_minutes: number }            // from FIRST segment's rule
+aggregateOpenMeter(segments: SegmentCostInput[], mods: OpenMeterModifiers): { total: Piastres; billable_minutes: number }
+
+// prepaid (lock invariant: non-null prepaid_total incl. 0 → charge exactly; null → block_price×max(1,blocks) fallback)
+computePrepaidCost(input: { prepaid_total: Piastres|null; block_price?: Piastres|null; blocks?: number }): Piastres
+// fixed-match (price locked at start)
+computeFixedMatchCost(input: { fixed_match_price: Piastres; match_count: number|null }): Piastres
+// grand total (orders + −discount, clamp >=0)
+computeGrandTotal(input: { time_total: Piastres; orders_total?: Piastres; discount?: Piastres }): Piastres
+// reconstruction from STORED snapshots ONLY (never reads current rate_rules — CLAUDE.md §3)
+reconstructTimeCost(input: { billing_mode; segments: SessionSegment[]; prepaid_total?; match_count?; modifiers?: OpenMeterModifiers; at_iso? }): Piastres
+```
+**Live vs. close:** mobile live = `planSegments(open seg)` → `aggregateOpenMeter` (+ prior closed segs) → `computeGrandTotal`. Close = same `planSegments` materializes the rows; stored `time_total` later equals `reconstructTimeCost` over those rows (reconstructibility, AC 25/37/38).
+
 ## Hard rules (enforced by `pricing-engine-guard`)
 - Never `Date.now()` inside cost math — pass `at_iso`. Never floats for money. Round once per segment.
 - No React/RN/Expo/Next/Supabase imports in `@ps/core`. Target **>90%** line coverage.
