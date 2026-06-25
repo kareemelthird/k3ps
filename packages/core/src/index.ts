@@ -29,4 +29,5 @@ export * from './inventory';
 export * from './pricing';
 export * from './orders';
 export * from './shifts';
+export * from './reports';
 export * from './types';

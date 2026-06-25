@@ -373,12 +373,103 @@ slot, and the persistent `OfflineBanner`. Web owner-read reuses the same regions
 
 ---
 
-## 10. Charts & data (for later owner-dashboard phases)
+## 10. Charts & data (owner-dashboard system — Phase 6)
 
-Reserved here so the system is complete (`chart-type`, `number-formatting`, `empty-data-state`): trend →
-line, comparison → bar, proportion → donut (≤5 slices). Always legend + tooltip-on-tap (≥44 hit), a table
-alternative for screen readers, accessible non-red/green-only palette with pattern fallback, skeleton while
-loading, explicit empty/error states, locale-aware Arabic-Indic axis numbers. Not implemented in Phase 2.
+Reserved at system level so the brand is complete (`chart-type`, `number-formatting`, `empty-data-state`).
+**First implemented in Phase 6** (`docs/design/phase-6-owner-dashboard-reports.md` — screens, table specs,
+states). This section is the **source of truth for chart tokens, the categorical palette, and RTL chart
+rules**; the feature doc composes against it and never re-derives a token. The chart *library* is an
+architect call (ADR-0007 Q7); everything here is **library-agnostic** (it constrains the SVG output, not the
+package).
+
+### 10.1 Chart color tokens (categorical + semantic)
+
+Charts draw from the same ramps as the UI so a series color always *means* the same thing it does elsewhere
+(`color-semantic`, `consistency`). The semantic four are fixed; the extended categorical sequence is for
+many-category series (e.g. top products by category). **Violet is never used in charts** (reserved for
+impersonation only). Red is reserved for *negative variance / loss*, never an ordinary category.
+
+| Token | Dark | Light | Meaning (fixed) |
+|---|---|---|---|
+| `chart-time` | `T500 #14B8A6` | `T600 #0D9488` | **Time revenue** (the core billable) — same teal as `primary` |
+| `chart-orders` | `B500 #3B82F6` | `B500 #3B82F6` | **Orders / snacks revenue** — same blue as `busy`/`info` |
+| `chart-discount` | `A500 #F59E0B` | `A600 #D97706` | **Discounts** — same amber as `warning` |
+| `chart-cash` | `G500 #10B981` | `G600 #059669` | **Cash** settled — same green as `status-free` |
+| `chart-pos` | `G500 #10B981` | `G600 #059669` | Positive variance / over |
+| `chart-neg` | `R500 #EF4444` | `R600 #DC2626` | Negative variance / short / loss |
+
+**Extended categorical sequence** (use *in order*, only when a series has no fixed semantic meaning — e.g.
+product categories): `T500` → `B500` → `A500` → `T300 #5EEAD4` → `B400 #60A5FA` → `N400 #64748B`. Six steps;
+beyond six, group the tail into an "أخرى / Other" bucket (`no-pie-overuse`, `data-density`).
+
+**Payment-mix series** (donut): cash = `chart-cash` (green), wallet = `chart-orders` (blue), other =
+`N400` neutral slate. (`debt` is inert this phase — excluded, never a slice; system §2.2.)
+
+### 10.2 Chart structural tokens
+
+```
+chart-grid        border  (#22304A dark / N200 light)   — gridlines, low-contrast (gridline-subtle)
+chart-axis        text-muted                              — axis ticks + labels
+chart-axis-title  text                                    — axis unit titles
+chart-track       surface-2                               — empty bar track / donut remainder
+chart-tooltip-bg  surface (e2 elevation) + border 1px     — popover on hover/tap
+series-stroke     2px                                      — line series weight
+bar-radius        radius.xs (8) on the bar's end cap only — never both ends
+donut-thickness   ~62% inner radius (calm ring, not thin) — matches the prepaid-ring lesson
+```
+
+### 10.3 Chart type mapping (which chart for which KPI)
+
+| KPI / data | Chart | Why (`chart-type`) |
+|---|---|---|
+| Revenue over time (per business-day) | **Stacked vertical bar** (time `chart-time` + orders `chart-orders`), one bar per business-day | comparison across discrete days; stack shows the time-vs-orders split inline |
+| Revenue split (time / orders / discount) | **Donut**, ≤3 slices, center = Gross total | proportion of a whole (`no-pie-overuse` ✓ ≤5) |
+| Top products | **Horizontal bar** (top N, qty↔revenue toggle) | ranked comparison; horizontal keeps long Arabic product names readable |
+| Device utilization | **Horizontal bar** per device (busy-minutes primary; % secondary label) | ranked comparison; horizontal fits device names |
+| Payment-method mix | **Donut**, 3 slices (cash/wallet/other) | proportion of settled revenue |
+| Sessions by day / peak | **Vertical bar** (count per business-day) | discrete-day comparison |
+
+Line is reserved for true continuous trends; with discrete business-day buckets and sparse café data, **bars
+read more honestly** than a connected line (avoids implying interpolation between closed days).
+
+### 10.4 RTL chart rules (binding — `rtl-i18n-check` covers Phase 6)
+
+- **Time axis flows right→left.** In a business-day bar chart the *earliest* day sits at the **right**, the
+  latest at the **left** (natural Arabic reading). Tooltips, brush, and any cursor follow the same direction.
+- **Horizontal bars grow from the right** (the start edge) leftward; the category label sits at the **start**
+  (right), the value label at the bar **end** (`direct-labeling` for ≤8 bars).
+- **Legends** sit at the **start** (top-right in RTL) or below; legend swatch precedes its label in reading
+  order; legends are **interactive** (tap a series to toggle, `legend-interactive`).
+- **Donut** sweeps and the legend order follow reading order; the center total is `money` role, tabular.
+- **Numerals on every axis tick, data label, tooltip, legend value, and donut center are Arabic-Indic**
+  (`toArabicDigits`); money via `formatEgp`; percentages via a shared `formatPercentAr` helper (Arabic-Indic
+  digits + `٪`). **No Western digits rendered in any chart** (CSV export is the only Western-digit surface).
+- **Never mirror a chart by flipping the whole SVG** (that would mirror glyphs); mirror by *configuring*
+  direction/scale so text stays legible (system §6: "do not mirror logos/media/illegibly").
+
+### 10.5 Chart accessibility (binding)
+
+- **Color is never the only signal:** every series carries a legend label + a **pattern/texture** fill option
+  for the stacked bar and donut (`pattern-texture`, `color-not-only`); the palette already avoids a
+  red/green-only pair for ordinary categories (`color-guidance`).
+- **Every chart ships a screen-reader text summary** (`screen-reader-summary`, one sentence of the key
+  insight) **and** the same numbers are available in the report table below it (the `DataTable` *is* the
+  accessible alternative, `data-table`).
+- **Tooltips are keyboard-reachable** and appear on tap (≥44 hit target on points/bars/slices,
+  `tooltip-keyboard`, `touch-target-chart`); they show the exact `formatEgp` value, not the rounded axis.
+- **Entrance animation respects `prefers-reduced-motion`** — data is readable immediately, the grow-in is
+  optional (`animation-optional`).
+- **Contrast:** data marks vs background ≥ 3:1, data text labels ≥ 4.5:1, gridlines low-contrast
+  (`contrast-data`, `gridline-subtle`), verified in both themes.
+
+### 10.6 Chart states (the four, every chart)
+
+| State | Chart contract |
+|---|---|
+| **Empty** | A drawn, labelled, **zeroed** frame + a centered "no data in this range" message (`empty-data-state`) — **never** a blank box and never a misleading flat line at 0 that looks like real data. |
+| **Loading** | A **skeleton** in the chart's footprint (shimmer block sized to the chart), not an empty axis frame (`loading-chart`); reserves space (CLS < 0.1). |
+| **Error** | Inline error card in the chart slot with **Retry** (`error-state-chart`) — never a broken/half-rendered axis. |
+| **Offline / stale** | Phase-6 reports are read-on-demand (no outbox); a stale view shows the last figures with a "reconnect / refresh" affordance (system §8 web rule). |
 
 ---
 

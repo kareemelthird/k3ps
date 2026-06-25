@@ -80,6 +80,29 @@ export function formatEgp(piastres: Piastres, withSuffix = true): string {
   return `${sign}${toArabicDigits(body)}${withSuffix ? ` ${CURRENCY.suffix}` : ''}`;
 }
 
+/**
+ * Machine-readable decimal-EGP string for CSV cells (ADR-0007 Decision 6):
+ * integer piastres -> `'1234.50'` — exactly two decimals, **Western** digits,
+ * dot decimal, **no** currency symbol and **no** thousands separator.
+ *
+ * This is the one place EGP is intentionally NOT Arabic-Indic: a CSV value an
+ * accountant/spreadsheet parses. On-screen money stays `formatEgp` (Arabic).
+ * Keeps currency formatting in @ps/core (CLAUDE.md §4), never inlined in UI.
+ *
+ * Pure and exact: integer arithmetic only, no float drift.
+ *   - `formatEgpPlain(0)      === '0.00'`
+ *   - `formatEgpPlain(50)     === '0.50'`
+ *   - `formatEgpPlain(123450) === '1234.50'`
+ *   - `formatEgpPlain(-250)   === '-2.50'`
+ */
+export function formatEgpPlain(piastres: Piastres): string {
+  const sign = piastres < 0 ? '-' : '';
+  const abs = Math.abs(Math.round(piastres));
+  const pounds = Math.floor(abs / CURRENCY.subunitsPerUnit);
+  const cents = abs % CURRENCY.subunitsPerUnit;
+  return `${sign}${pounds}${CURRENCY.decimalSeparator}${cents.toString().padStart(2, '0')}`;
+}
+
 /** Group a non-negative integer into thousands using the Arabic separator. */
 function groupThousands(n: number): string {
   // Locale-free grouping so output is deterministic regardless of host locale.

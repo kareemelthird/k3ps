@@ -14,5 +14,6 @@ export {
   egpToPiastres,
   piastresToEgp,
   formatEgp,
+  formatEgpPlain,
   sumPiastres,
 } from './money';
