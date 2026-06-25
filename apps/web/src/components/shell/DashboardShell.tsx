@@ -76,9 +76,10 @@ export function DashboardShell() {
     void fetchBranches();
   }, [fetchBranches]);
 
-  function handleBranchSelect(id: string) {
+  function handleBranchSelect(id: string | null) {
     setActiveBranchId(id);
-    localStorage.setItem(BRANCH_STORAGE_KEY, id);
+    if (id) localStorage.setItem(BRANCH_STORAGE_KEY, id);
+    else localStorage.removeItem(BRANCH_STORAGE_KEY);
   }
 
   const activeBranch = branches.find((b) => b.id === activeBranchId);

@@ -129,7 +129,8 @@
       "title": "لا توجد فروع",
       "body": "لم يتم تعيين أي فرع لهذا الحساب — تواصل مع المالك"
     },
-    "label": "الفرع"
+    "label": "الفرع",
+    "all": "كل الفروع"
   },
   "devices": {
     "title": "الأجهزة",
@@ -209,7 +210,8 @@
     "sessions": "الجلسات",
     "dashboard": "لوحة التحكم",
     "rateRules": "قواعد الأسعار",
-    "products": "قائمة المنتجات"
+    "products": "قائمة المنتجات",
+    "reports": "التقارير"
   },
   "products": {
     "title": "قائمة المنتجات",
@@ -289,5 +291,143 @@
   },
   "app": {
     "name": "PS Management"
+  },
+  "reports": {
+    "title": "التقارير",
+    "subtitle": "تحليلات الإيرادات والجلسات والمنتجات والمناوبات",
+    "exportCsv": "تصدير CSV",
+    "exporting": "جارٍ التصدير...",
+    "exportDone": "تم التصدير بنجاح",
+    "denied": {
+      "title": "الوصول مقيد",
+      "body": "هذه الصفحة متاحة للمالك فقط",
+      "backToDashboard": "العودة للوحة التحكم"
+    },
+    "empty": {
+      "title": "لا توجد بيانات",
+      "body": "لا توجد بيانات في هذه الفترة — حاول اختيار فترة أوسع أو فرع مختلف"
+    },
+    "lastUpdated": "آخر تحديث: {time}",
+    "refresh": "تحديث",
+    "tab": {
+      "byDay": "يوميًا",
+      "byDevice": "حسب الجهاز",
+      "byProduct": "حسب المنتج",
+      "byShift": "المناوبات"
+    },
+    "byDay": { "empty": "لا توجد بيانات يومية في هذه الفترة" },
+    "byDevice": { "empty": "لا توجد بيانات أجهزة في هذه الفترة" },
+    "byProduct": { "empty": "لا توجد بيانات منتجات في هذه الفترة" },
+    "byShift": { "empty": "لا توجد مناوبات مغلقة في هذه الفترة" },
+    "shift": {
+      "short": "عجز",
+      "over": "فائض",
+      "balanced": "متوازن"
+    }
+  },
+  "range": {
+    "label": "اختر الفترة",
+    "preset": {
+      "today": "اليوم",
+      "yesterday": "أمس",
+      "last7": "آخر ٧ أيام",
+      "thisMonth": "هذا الشهر",
+      "lastMonth": "الشهر الماضي",
+      "custom": "مخصص"
+    },
+    "from": "من",
+    "to": "إلى",
+    "apply": "تطبيق",
+    "cancel": "إلغاء",
+    "error": {
+      "invalid": "تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية"
+    },
+    "scopeHeader": "{preset} · {branch} · {from} – {to}"
+  },
+  "kpi": {
+    "gross": {
+      "label": "الإجمالي",
+      "sub": "{sessions} جلسة · {walkins} طلب خارجي"
+    },
+    "time": {
+      "label": "إيرادات الوقت",
+      "sub": "{n} جلسة"
+    },
+    "orders": {
+      "label": "إيرادات المنتجات",
+      "sub": "{k} صنف مُباع"
+    },
+    "discounts": {
+      "label": "الخصومات",
+      "sub": "على {n} جلسة"
+    },
+    "cash": {
+      "label": "الكاش",
+      "sub": "{pct}٪ من الإجمالي"
+    },
+    "noData": "لا توجد بيانات في هذه الفترة"
+  },
+  "chart": {
+    "revenueOverTime": { "title": "الإيراد عبر الزمن" },
+    "revenueSplit": { "title": "توزيع الإيراد" },
+    "topProducts": { "title": "أفضل المنتجات" },
+    "deviceUtilization": { "title": "استخدام الأجهزة" },
+    "paymentMix": { "title": "طرق الدفع" },
+    "legend": {
+      "time": "الوقت",
+      "orders": "المنتجات",
+      "discount": "الخصومات",
+      "cash": "كاش",
+      "wallet": "محفظة",
+      "other": "أخرى"
+    },
+    "toggle": { "qty": "الكمية", "revenue": "الإيراد" },
+    "axis": {
+      "day": "اليوم",
+      "egp": "ج.م",
+      "minutes": "دقيقة",
+      "utilizationOf24h": "٪ من ٢٤ ساعة"
+    },
+    "empty": "لا توجد بيانات للعرض",
+    "summary": {
+      "revenueOverTime": "رسم بياني للإيراد اليومي خلال الفترة المحددة",
+      "revenueSplit": "توزيع الإيراد بين الوقت والمنتجات والخصومات",
+      "topProducts": "أفضل المنتجات مبيعًا خلال الفترة المحددة",
+      "deviceUtilization": "نسبة انشغال الأجهزة خلال الفترة المحددة",
+      "paymentMix": "توزيع المدفوعات حسب طريقة الدفع"
+    }
+  },
+  "col": {
+    "day": "اليوم",
+    "gross": "الإجمالي",
+    "time": "الوقت",
+    "orders": "المنتجات",
+    "discount": "الخصومات",
+    "cash": "الكاش",
+    "sessions": "الجلسات",
+    "walkins": "الطلبات الخارجية",
+    "device": "الجهاز",
+    "busyMinutes": "دقائق الانشغال",
+    "utilization": "الاستخدام",
+    "revenue": "الإيراد",
+    "product": "المنتج",
+    "category": "الفئة",
+    "qty": "الكمية",
+    "productRevenue": "الإيراد",
+    "margin": "هامش الربح",
+    "shiftOpened": "بداية المناوبة",
+    "manager": "المدير",
+    "openingCash": "الرصيد الافتتاحي",
+    "expectedCash": "المتوقع",
+    "actualCash": "المحسوب",
+    "difference": "الفرق",
+    "total": "الإجمالي"
+  },
+  "format": {
+    "percentSuffix": "٪",
+    "duration": {
+      "hours": "س",
+      "minutes": "د"
+    }
   }
 }

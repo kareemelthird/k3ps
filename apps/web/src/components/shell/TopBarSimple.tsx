@@ -3,7 +3,9 @@
 /**
  * TopBarSimple — lighter version of TopBar for inner dashboard pages.
  *
- * Includes nav links (Devices, Rate Rules) and sign-out.
+ * Includes nav links (Devices, Rate Rules, Products, [Reports — owner only])
+ * and sign-out. Phase 6 adds the owner-gated Reports nav item (AC 12 / spec §6 Q8).
+ *
  * RTL: all spacing uses logical props (start/end).
  * All strings via i18n (no hardcoded copy).
  */
@@ -26,13 +28,18 @@ export function TopBarSimple({
   tenantName,
 }: TopBarSimpleProps) {
   const t = useTranslations();
-  const { signOut } = useAuth();
+  const { claim, signOut } = useAuth();
   const pathname = usePathname();
+
+  const isOwner = (claim?.roles.includes('owner') ?? false) || (claim?.is_super_admin ?? false);
 
   const navItems = [
     { href: '/dashboard', label: t('nav.devices') },
     { href: '/dashboard/rate-rules', label: t('nav.rateRules') },
     { href: '/dashboard/products', label: t('nav.products') },
+    // Reports: owner-only nav item (AC 12 / design §2).
+    // The nav item is hidden for non-owners (empty-nav-state pattern).
+    ...(isOwner ? [{ href: '/dashboard/reports', label: t('nav.reports') }] : []),
   ];
 
   return (

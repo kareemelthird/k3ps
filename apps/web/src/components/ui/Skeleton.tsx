@@ -9,14 +9,16 @@
 interface SkeletonProps {
   className?: string;
   'aria-label'?: string;
+  style?: React.CSSProperties;
 }
 
-export function Skeleton({ className = '', 'aria-label': ariaLabel }: SkeletonProps) {
+export function Skeleton({ className = '', 'aria-label': ariaLabel, style }: SkeletonProps) {
   return (
     <div
       role="status"
       aria-label={ariaLabel ?? 'جارٍ التحميل'}
       aria-busy="true"
+      style={style}
       className={`bg-surface-3 rounded-md animate-pulse motion-reduce:animate-none ${className}`}
     />
   );

@@ -15,7 +15,7 @@ interface TopBarProps {
   tenantName?: string;
   branches: Branch[];
   activeBranchId: string | null;
-  onBranchSelect: (id: string) => void;
+  onBranchSelect: (id: string | null) => void;
   branchesLoading?: boolean;
 }
 

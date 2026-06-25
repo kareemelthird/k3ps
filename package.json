@@ -19,5 +19,8 @@
   "packageManager": "npm@10.0.0",
   "devDependencies": {
     "supabase": "^2.107.0"
+  },
+  "overrides": {
+    "react-is": "^19.0.0"
   }
 }

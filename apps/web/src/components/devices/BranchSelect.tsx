@@ -4,6 +4,10 @@
  * BranchSelect — web form of BranchPicker (design-system §9.12)
  * A <select> in the topbar for branch switching within the active tenant.
  * The tenant is always from the signed JWT claim — never client-supplied.
+ *
+ * Phase 6: added `allowAll` prop that prepends an "All branches" sentinel
+ * (value='ALL') for the reports scope bar (design-system phase-6 §4.2).
+ * Existing usages with `allowAll=false` (default) are unchanged.
  */
 import { useTranslations } from 'next-intl';
 import type { Branch } from '@ps/core';
@@ -11,8 +15,10 @@ import type { Branch } from '@ps/core';
 interface BranchSelectProps {
   branches: Branch[];
   activeId: string | null;
-  onSelect: (branchId: string) => void;
+  onSelect: (branchId: string | null) => void;
   loading?: boolean;
+  /** When true, prepends an "All branches" option (value = null). Default false. */
+  allowAll?: boolean;
 }
 
 export function BranchSelect({
@@ -20,8 +26,9 @@ export function BranchSelect({
   activeId,
   onSelect,
   loading = false,
+  allowAll = false,
 }: BranchSelectProps) {
-  const t = useTranslations('branch');
+  const t = useTranslations();
 
   if (loading) {
     return (
@@ -29,21 +36,29 @@ export function BranchSelect({
     );
   }
 
+  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    onSelect(val === 'ALL' ? null : val);
+  };
+
   return (
     <div className="flex items-center gap-xs">
       <label htmlFor="branch-select" className="text-label text-text-muted sr-only">
-        {t('label')}
+        {t('branch.label')}
       </label>
       <select
         id="branch-select"
-        value={activeId ?? ''}
-        onChange={(e) => onSelect(e.target.value)}
-        aria-label={t('label')}
+        value={activeId ?? (allowAll ? 'ALL' : '')}
+        onChange={handleChange}
+        aria-label={t('branch.label')}
         className="h-[36px] px-sm pe-8 rounded-xs bg-surface-3 border border-border text-label text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-border-strong transition-colors cursor-pointer appearance-none"
       >
-        {!activeId && (
+        {allowAll && (
+          <option value="ALL">{t('branch.all')}</option>
+        )}
+        {!allowAll && !activeId && (
           <option value="" disabled>
-            {t('choose.title')}
+            {t('branch.choose.title')}
           </option>
         )}
         {branches.map((b) => (

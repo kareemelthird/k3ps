@@ -34,6 +34,18 @@ const config: Config = {
           600: '#0D9488',
           700: '#0F766E',
         },
+        // ── Chart color tokens (design-system.md §10, Phase 6) ────────────
+        // Fixed hex values (not CSS vars) — used directly in SVG/canvas via Recharts
+        'chart-time':    '#14B8A6',  // T500 teal — time revenue (brand)
+        'chart-orders':  '#3B82F6',  // B500 blue — orders
+        'chart-discount':'#F59E0B',  // A500 amber — discounts
+        'chart-cash':    '#10B981',  // G500 green — cash / balanced
+        'chart-pos':     '#34D399',  // G400 lighter green — positive variance
+        'chart-neg':     '#EF4444',  // R500 red — negative variance / short
+        'chart-track':   '#1E293B',  // N700 — bar track background
+        'chart-grid':    '#1E293B',  // N700 — chart gridlines
+        'chart-axis':    '#94A3B8',  // N300 — axis tick labels
+        'chart-tooltip-bg': '#131A26', // N800 — tooltip background
         // Semantic tokens mapped to CSS variables for both dark/light
         bg: 'var(--color-bg)',
         surface: 'var(--color-surface)',
