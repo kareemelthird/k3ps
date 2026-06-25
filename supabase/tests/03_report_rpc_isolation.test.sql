@@ -249,7 +249,7 @@ set local role authenticated;
 --    A has: session 5e01 (6500) + walk-in 0a01 (1500) + session 5e02 (5000) + walk-in 0a02 (800) = 13800.
 --    B's gross (9999+9000=18999) would raise this number if leaked.
 select is(
-  (select coalesce(sum(gross), 0)
+  (select coalesce(sum(gross), 0)::bigint
    from public.report_revenue_by_day(
      '2026-01-01 00:00:00+00'::timestamptz,
      '2027-01-01 00:00:00+00'::timestamptz,
@@ -282,7 +282,7 @@ select is(
 -- 4. report_payment_mix: A cash total = 13800 (5e01:6500 + 0a01:1500 + 5e02:5000 + 0a02:800).
 --    B cash total would be 18999 if leaked.
 select is(
-  (select coalesce(sum(amount), 0)
+  (select coalesce(sum(amount), 0)::bigint
    from public.report_payment_mix(
      '2026-01-01 00:00:00+00'::timestamptz,
      '2027-01-01 00:00:00+00'::timestamptz,
