@@ -38,7 +38,7 @@ function pct(piastres: number, total: number): string {
 function formatDateAr(key: string): string {
   const d = new Date(`${key}T00:00:00Z`);
   return toArabicDigits(
-    new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'long' }).format(d),
+    new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'long', timeZone: 'Africa/Cairo' }).format(d),
   );
 }
 
@@ -214,7 +214,7 @@ export function ByDayTable({ data, loading, error, onRetry }: ByDayTableProps) {
       numCell(r.session_count),
       numCell(r.walkin_order_count),
     ]);
-    downloadCsv(buildCsv(headers, rows), `تقرير-يومي-${new Date().toISOString().slice(0, 10)}.csv`);
+    downloadCsv(buildCsv(headers, rows), `${t('reports.csv.filename.byDay')}-${new Date().toISOString().slice(0, 10)}.csv`);
   }
 
   return (
@@ -283,9 +283,9 @@ export function ByDeviceTable({ data, fromKey, toKey, loading, error, onRetry }:
   const totalBusy = data.reduce((sum, r) => sum + r.busy_minutes, 0);
   const totalRevenue = data.reduce((sum, r) => sum + r.revenue, 0);
 
-  function utilizationPct(busyMinutes: number): string {
-    if (totalAvailableMinutes === 0) return toArabicDigits('0.0') + '٪';
-    return toArabicDigits(((busyMinutes / totalAvailableMinutes) * 100).toFixed(1)) + '٪';
+  function utilizationPct(busyMinutes: number, denominator = totalAvailableMinutes): string {
+    if (denominator === 0) return toArabicDigits('0.0') + '٪';
+    return toArabicDigits(((busyMinutes / denominator) * 100).toFixed(1)) + '٪';
   }
 
   function handleExport() {
@@ -299,7 +299,7 @@ export function ByDeviceTable({ data, fromKey, toKey, loading, error, onRetry }:
       numCell(r.session_count),
       moneyCell(r.revenue),
     ]);
-    downloadCsv(buildCsv(headers, rows), `تقرير-أجهزة-${new Date().toISOString().slice(0, 10)}.csv`);
+    downloadCsv(buildCsv(headers, rows), `${t('reports.csv.filename.byDevice')}-${new Date().toISOString().slice(0, 10)}.csv`);
   }
 
   return (
@@ -333,7 +333,7 @@ export function ByDeviceTable({ data, fromKey, toKey, loading, error, onRetry }:
       footer={<>
         <TD><span className="text-text-muted">{t('col.total')}</span></TD>
         <TD align="end">{busyMinutesAr(totalBusy)}</TD>
-        <TD align="end">{utilizationPct(totalBusy)}</TD>
+        <TD align="end">{utilizationPct(totalBusy, totalAvailableMinutes * data.length)}</TD>
         <TD />
         <TD align="end" className="text-primary">{formatEgp(totalRevenue)}</TD>
       </>}
@@ -372,7 +372,7 @@ export function ByProductTable({ data, loading, error, onRetry }: ByProductTable
       moneyCell(r.revenue),
       r.cost !== null ? moneyCell(r.revenue - r.cost * r.qty) : '',
     ]);
-    downloadCsv(buildCsv(headers, rows), `تقرير-منتجات-${new Date().toISOString().slice(0, 10)}.csv`);
+    downloadCsv(buildCsv(headers, rows), `${t('reports.csv.filename.byProduct')}-${new Date().toISOString().slice(0, 10)}.csv`);
   }
 
   return (
@@ -496,7 +496,7 @@ export function ByShiftTable({ data, loading, error, onRetry }: ByShiftTableProp
       moneyCell(r.actual_cash),
       moneyCell(r.difference),
     ]);
-    downloadCsv(buildCsv(headers, rows), `تقرير-مناوبات-${new Date().toISOString().slice(0, 10)}.csv`);
+    downloadCsv(buildCsv(headers, rows), `${t('reports.csv.filename.byShift')}-${new Date().toISOString().slice(0, 10)}.csv`);
   }
 
   return (

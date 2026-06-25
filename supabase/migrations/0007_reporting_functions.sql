@@ -66,11 +66,16 @@ stable
 security invoker
 set search_path = public
 as $$
-  with rows as (
+  -- p_cutover clamped to [0,23]: an out-of-range value corrupts business-day
+  -- labels only for the caller; clamp is a data-quality guard (NB-1 hardening).
+  with cutover(v) as (
+    select greatest(0, least(23, p_cutover))
+  ),
+  rows as (
     -- Closed sessions, anchored at started_at (revenue recognised when play began)
     select
       ((s.started_at at time zone 'Africa/Cairo')
-        - make_interval(hours => p_cutover))::date::text as business_day,
+        - make_interval(hours => (select v from cutover)))::date::text as business_day,
       s.time_total::bigint   as time_total,
       s.orders_total::bigint as orders_total,
       s.discount::bigint     as discount,
@@ -81,13 +86,14 @@ as $$
     where s.status = 'closed'
       and s.started_at >= p_from and s.started_at < p_to
       and (p_branch is null or s.branch_id = p_branch)
+      and (select public.is_tenant_owner())   -- short-circuit per-branch (NB-1 hardening)
     union all
     -- Walk-in paid orders (session_id IS NULL), anchored at created_at.
     -- No paid_at column exists; created_at is the stable anchor for one-shot
     -- counter sales (ADR-0007 Decision 2).
     select
       ((o.created_at at time zone 'Africa/Cairo')
-        - make_interval(hours => p_cutover))::date::text,
+        - make_interval(hours => (select v from cutover)))::date::text,
       0::bigint, o.total::bigint, 0::bigint, o.total::bigint,
       0::bigint, 1::bigint
     from public.orders o
@@ -95,6 +101,7 @@ as $$
       and o.status = 'paid'
       and o.created_at >= p_from and o.created_at < p_to
       and (p_branch is null or o.branch_id = p_branch)
+      and (select public.is_tenant_owner())   -- short-circuit per-branch (NB-1 hardening)
   )
   select
     r.business_day,
@@ -105,7 +112,7 @@ as $$
     sum(r.is_session),
     sum(r.is_walkin)
   from rows r
-  where (select public.is_tenant_owner())   -- owner-only DB gate (defense in depth)
+  where (select public.is_tenant_owner())   -- outer owner gate (defense in depth, ADR-0007 D8)
   group by r.business_day
   order by r.business_day;
 $$;
@@ -153,6 +160,7 @@ as $$
   from public.devices d
   left join public.sessions s
     on s.device_id = d.id
+   and s.tenant_id = d.tenant_id    -- second line of defense: explicit tenant join predicate (NB-1 hardening)
    and s.status = 'closed'
    and s.started_at >= p_from and s.started_at < p_to
   where (p_branch is null or d.branch_id = p_branch)
@@ -246,6 +254,7 @@ as $$
     where s.status = 'closed'
       and s.started_at >= p_from and s.started_at < p_to
       and (p_branch is null or s.branch_id = p_branch)
+      and (select public.is_tenant_owner())   -- short-circuit per-branch (NB-1 hardening)
     union all
     select coalesce(o.payment_method::text, 'unknown'),
            o.total::bigint
@@ -253,10 +262,11 @@ as $$
     where o.session_id is null and o.status = 'paid'
       and o.created_at >= p_from and o.created_at < p_to
       and (p_branch is null or o.branch_id = p_branch)
+      and (select public.is_tenant_owner())   -- short-circuit per-branch (NB-1 hardening)
   )
   select r.payment_method, sum(r.amount), count(*)::bigint
   from rows r
-  where (select public.is_tenant_owner())    -- owner-only DB gate (defense in depth)
+  where (select public.is_tenant_owner())    -- outer owner gate (defense in depth, ADR-0007 D8)
   group by r.payment_method
   order by sum(r.amount) desc;
 $$;
@@ -291,10 +301,11 @@ stable
 security invoker
 set search_path = public
 as $$
+  -- p_cutover clamped to [0,23]: data-quality guard (NB-1 hardening).
   select
     sh.id,
     ((sh.opened_at at time zone 'Africa/Cairo')
-      - make_interval(hours => p_cutover))::date::text,
+      - make_interval(hours => greatest(0, least(23, p_cutover))))::date::text,
     sh.opened_at, sh.closed_at,
     sh.opening_cash, sh.expected_cash, sh.actual_cash, sh.difference,
     sh.manager_id
@@ -302,7 +313,7 @@ as $$
   where sh.status = 'closed'
     and sh.opened_at >= p_from and sh.opened_at < p_to
     and (p_branch is null or sh.branch_id = p_branch)
-    and (select public.is_tenant_owner())    -- owner-only DB gate (defense in depth)
+    and (select public.is_tenant_owner())    -- owner-only DB gate (defense in depth, ADR-0007 D8)
   order by sh.opened_at;
 $$;
 

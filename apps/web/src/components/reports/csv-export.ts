@@ -19,11 +19,26 @@ export { formatEgpPlain };
 const BOM = '﻿';
 
 /**
- * Escape a single CSV cell value per RFC-4180.
- * Fields containing , " or newline are wrapped in double-quotes.
- * Embedded double-quotes are doubled ("").
+ * Spreadsheet formula-injection triggers. A cell beginning with any of these is
+ * interpreted as a formula by Excel/Sheets/Calc; a free-text device or product
+ * name like `=HYPERLINK(...)` would execute on open. We neutralise it by
+ * prefixing a single quote (OWASP CSV-injection mitigation) inside a quoted cell.
+ */
+const FORMULA_TRIGGERS = ['=', '+', '-', '@', '\t', '\r'];
+/** Plain numeric literals (incl. negatives/decimals) are safe — must not be quoted as text. */
+const NUMERIC = /^-?\d+(\.\d+)?$/;
+
+/**
+ * Escape a single CSV cell value per RFC-4180, with formula-injection guard.
+ * Fields containing , " or newline are wrapped in double-quotes; embedded
+ * double-quotes are doubled (""). Free-text fields starting with a formula
+ * trigger (and not a plain number, e.g. a negative money value) are prefixed
+ * with ' inside a quoted cell so spreadsheets treat them as literal text.
  */
 function csvCell(val: string): string {
+  if (val.length > 0 && FORMULA_TRIGGERS.includes(val[0]!) && !NUMERIC.test(val)) {
+    return `"'${val.replace(/"/g, '""')}"`;
+  }
   if (val.includes('"') || val.includes(',') || val.includes('\n') || val.includes('\r')) {
     return `"${val.replace(/"/g, '""')}"`;
   }

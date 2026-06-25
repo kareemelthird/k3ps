@@ -113,14 +113,26 @@ export const DEFAULT_CUTOVER_HOUR = 6;
  * cutover hour so late-night activity stays on the previous business day
  * (ADR-0006 Decision 1 — the dominant late-night-café pattern).
  *
- * Algorithm: take the local (`tz`) wall-clock of `atIso`, subtract `cutoverHour`
- * hours, and return the resulting local calendar date.
+ * Algorithm: take the local (`tz`) **wall-clock** of `atIso`, then subtract
+ * `cutoverHour` as a **naive (DST-free) wall-clock** operation, and return the
+ * resulting calendar date.
  *   cutover 6: `2026-06-12T02:00` Cairo → `'2026-06-11'`;
  *              `2026-06-12T06:00` Cairo → `'2026-06-12'`.
  *
- * Pure: the instant is passed in (no clock read). DST-safe via the dayjs tz
- * plugin already used by {@link dayTypeAt} / {@link localHm} — the subtraction
- * happens on the zoned instant, so a DST shift on the business day is absorbed.
+ * This is the **identical definition** to the authoritative SQL reporting
+ * functions (migration 0007), which bucket rows by
+ *   `((anchor AT TIME ZONE 'Africa/Cairo') - make_interval(hours => cutover))::date`
+ * — i.e. take the Cairo wall-clock, subtract the cutover as a plain interval on
+ * a timestamp-without-time-zone, then `::date`. We reproduce that exactly: the
+ * `tz` conversion yields the wall-clock; re-parsing it via `dayjs.utc` (UTC has
+ * no DST) makes the subtraction a pure clock operation, never crossing a UTC
+ * offset boundary. A previous implementation subtracted `cutoverHour` as an
+ * **absolute duration on the zoned instant**, which produced the WRONG date for
+ * instants in the first cutover hour of Egypt's DST spring-forward day (the
+ * skipped 00:00–00:59 local hour made the absolute window span an extra
+ * wall-clock hour). See report-helpers parity tests for the DST cases.
+ *
+ * Pure: the instant is passed in (no clock read). Same input → same output.
  *
  * @param atIso      the instant (UTC ISO-8601, or any dayjs-parseable instant)
  * @param cutoverHour hours after local midnight the business day starts (default 6)
@@ -131,7 +143,11 @@ export function businessDayKey(
   cutoverHour: number = DEFAULT_CUTOVER_HOUR,
   tz: string = CAFE_TZ,
 ): string {
-  return dayjs(atIso).tz(tz).subtract(cutoverHour, 'hour').format('YYYY-MM-DD');
+  // Cairo wall-clock of the instant, as a naive (zone-free) datetime string.
+  const naiveLocal = dayjs(atIso).tz(tz).format('YYYY-MM-DDTHH:mm:ss');
+  // Subtract the cutover on a DST-free timeline (UTC), then take the date.
+  // Matches Postgres `timestamp - make_interval(...)` exactly.
+  return dayjs.utc(naiveLocal).subtract(cutoverHour, 'hour').format('YYYY-MM-DD');
 }
 
 export { dayjs };

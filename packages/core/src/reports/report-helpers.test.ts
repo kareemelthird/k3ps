@@ -116,14 +116,24 @@ describe('businessDayRange <-> businessDayKey parity', () => {
     '2026-06-10T10:00:00.000Z', // 13:00 Cairo -> key 2026-06-10
     '2026-06-10T21:30:00.000Z', // 00:30 Cairo 2026-06-11 (UTC day differs from Cairo day) -> key 2026-06-10
     '2026-06-11T02:59:00.000Z', // 05:59 Cairo 2026-06-11 -> key 2026-06-10
-    '2026-04-24T12:00:00.000Z', // Egypt DST spring-forward day -> key 2026-04-24
+    // DST spring-forward day (2026-04-24) — the boundary the 12:00 instant missed.
+    '2026-04-24T02:59:00.000Z', // 05:59 Cairo -> key 2026-04-23 (just before cutover)
+    '2026-04-24T03:00:00.000Z', // 06:00 Cairo -> key 2026-04-24 (cutover instant)
+    '2026-04-24T03:30:00.000Z', // 06:30 Cairo -> key 2026-04-24 (first cutover hour; was WRONG)
+    '2026-04-24T12:00:00.000Z', // 15:00 Cairo -> key 2026-04-24 (midday)
+    // DST fall-back day (2026-10-30) — at and around the cutover.
+    '2026-10-30T03:30:00.000Z', // 05:30 Cairo -> key 2026-10-29 (before cutover)
+    '2026-10-30T04:00:00.000Z', // 06:00 Cairo -> key 2026-10-30 (cutover instant)
     '2026-10-30T01:00:00.000Z', // around Egypt DST fall-back -> well-defined key
   ];
 
   const ranges: Array<[string, string]> = [
     ['2026-06-10', '2026-06-10'],
     ['2026-06-09', '2026-06-11'],
+    ['2026-04-23', '2026-04-23'],
     ['2026-04-24', '2026-04-24'],
+    ['2026-04-23', '2026-04-24'],
+    ['2026-10-29', '2026-10-30'],
     ['2026-10-30', '2026-10-30'],
   ];
 
@@ -148,6 +158,32 @@ describe('businessDayRange <-> businessDayKey parity', () => {
       // toIso itself is excluded and belongs to the day AFTER toKey.
       expect(businessDayKey(toIso) > toKey).toBe(true);
     }
+  });
+
+  it('spring-forward day: start lands on the correct cutover instant (03:00Z, not 04:00Z)', () => {
+    // 06:00 Cairo on 2026-04-24 is UTC+3 (after the 00:00→01:00 jump) = 03:00Z.
+    // The old absolute-hour math (local midnight + 6h) crossed the offset and
+    // produced 04:00Z, an hour late.
+    const { fromIso, toIso } = businessDayRange('2026-04-24', '2026-04-24');
+    expect(fromIso).toBe('2026-04-24T03:00:00.000Z');
+    // Day after the spring-forward day is fully in UTC+3 → 06:00 Cairo = 03:00Z.
+    expect(toIso).toBe('2026-04-25T03:00:00.000Z');
+  });
+
+  it('spring-forward day: a 06:00–06:59 Cairo instant is included iff the range covers 2026-04-24', () => {
+    const at = '2026-04-24T03:30:00.000Z'; // 06:30 Cairo on the DST day
+    expect(businessDayKey(at)).toBe('2026-04-24');
+
+    const covering = businessDayRange('2026-04-24', '2026-04-24');
+    expect(at >= covering.fromIso && at < covering.toIso).toBe(true);
+
+    const notCovering = businessDayRange('2026-04-23', '2026-04-23');
+    expect(at >= notCovering.fromIso && at < notCovering.toIso).toBe(false);
+  });
+
+  it('fall-back day: cutover start is 06:00 Cairo = 04:00Z (UTC+2)', () => {
+    const { fromIso } = businessDayRange('2026-10-30', '2026-10-30');
+    expect(fromIso).toBe('2026-10-30T04:00:00.000Z');
   });
 
   it('parity holds for a custom cutover (3am) across the boundary', () => {
@@ -178,6 +214,18 @@ describe('daysInRange — inclusive calendar-day count', () => {
 
   it('counts a full non-leap February correctly', () => {
     expect(daysInRange('2026-02-01', '2026-02-28')).toBe(28);
+  });
+
+  it('counts a full leap-year February correctly (29 days)', () => {
+    // 2028 is a leap year
+    expect(daysInRange('2028-02-01', '2028-02-29')).toBe(29);
+  });
+
+  it('reversed range (from > to) returns a non-positive result — caller is expected to guard', () => {
+    // The web layer blocks from > to before calling daysInRange (AC 13 / BusinessDayRangePicker).
+    // Documenting the raw function behaviour: the result is ≤ 0 (negative or zero) so
+    // the caller can detect an invalid range without a thrown exception.
+    expect(daysInRange('2026-06-07', '2026-06-01')).toBeLessThanOrEqual(0);
   });
 });
 
@@ -220,6 +268,24 @@ describe('formatEgpPlain — CSV decimal EGP, Western digits', () => {
   it('defensively rounds a non-integer input once (no float drift)', () => {
     expect(formatEgpPlain(250.4)).toBe('2.50');
     expect(formatEgpPlain(250.6)).toBe('2.51');
+  });
+});
+
+// ─── businessDayRange spanning a leap day ─────────────────────────────────────
+describe('businessDayRange — leap year', () => {
+  it('Feb 29 of a leap year is a valid business-day key (winter Cairo = UTC+2)', () => {
+    // 2028 is a leap year. Cutover 6, winter: 06:00 Cairo = 04:00 UTC.
+    const { fromIso, toIso } = businessDayRange('2028-02-29', '2028-02-29');
+    expect(fromIso).toBe('2028-02-29T04:00:00.000Z');
+    expect(toIso).toBe('2028-03-01T04:00:00.000Z');
+  });
+
+  it('businessDayKey round-trips through leap Feb 29', () => {
+    // An instant 3 hours into the 2028-02-29 business day (09:00 Cairo = 07:00 UTC, winter)
+    const atInDay = '2028-02-29T07:00:00.000Z';
+    expect(businessDayKey(atInDay)).toBe('2028-02-29');
+    const { fromIso, toIso } = businessDayRange('2028-02-29', '2028-02-29');
+    expect(atInDay >= fromIso && atInDay < toIso).toBe(true);
   });
 });
 

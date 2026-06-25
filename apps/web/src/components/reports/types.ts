@@ -73,7 +73,6 @@ export interface KpiTotals {
   sessionCount: number;
   walkinOrderCount: number;
   cashRevenue: number;
-  grossForCashPct: number;
 }
 
 /** Scope: the date range + branch filter that drives every report query */

@@ -323,6 +323,14 @@
       "short": "عجز",
       "over": "فائض",
       "balanced": "متوازن"
+    },
+    "csv": {
+      "filename": {
+        "byDay": "تقرير-يومي",
+        "byDevice": "تقرير-أجهزة",
+        "byProduct": "تقرير-منتجات",
+        "byShift": "تقرير-مناوبات"
+      }
     }
   },
   "range": {
@@ -379,7 +387,9 @@
       "discount": "الخصومات",
       "cash": "كاش",
       "wallet": "محفظة",
-      "other": "أخرى"
+      "other": "أخرى",
+      "revenue": "الإيراد",
+      "qty": "الكمية"
     },
     "toggle": { "qty": "الكمية", "revenue": "الإيراد" },
     "axis": {

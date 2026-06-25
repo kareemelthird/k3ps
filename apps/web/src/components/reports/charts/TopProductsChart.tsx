@@ -53,8 +53,8 @@ export function TopProductsChart({ data, toggle, height = 280 }: TopProductsChar
   // Recharts 3: value may be undefined in the type union; guard at runtime.
   const tooltipFormatter = (value: unknown): [string, string] => {
     const num = typeof value === 'number' ? value : 0;
-    if (toggle === 'revenue') return [formatEgp(num), t('chart.legend.time')];
-    return [toArabicDigits(String(num)), t('chart.toggle.qty')];
+    if (toggle === 'revenue') return [formatEgp(num), t('chart.legend.revenue')];
+    return [toArabicDigits(String(num)), t('chart.legend.qty')];
   };
 
   return (

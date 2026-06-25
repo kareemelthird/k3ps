@@ -69,7 +69,7 @@ function computePresets(cutoverHour: number): Record<RangePreset, { fromKey: str
 /** Format a YYYY-MM-DD key as a human-readable Arabic date "١٢ يونيو" */
 function formatDateKeyAr(key: string): string {
   const d = new Date(`${key}T00:00:00Z`);
-  return new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'long' }).format(d);
+  return new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'long', timeZone: 'Africa/Cairo' }).format(d);
 }
 
 interface BusinessDayRangePickerProps {

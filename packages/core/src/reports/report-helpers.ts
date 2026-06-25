@@ -30,7 +30,7 @@ export interface BusinessDayWindow {
  * the half-open UTC window `[fromIso, toIso)` that exactly covers those business
  * days for the given tenant cutover hour.
  *
- * The window is the exact inverse of {@link businessDayKey}'s absolute-hour
+ * The window is the exact inverse of {@link businessDayKey}'s wall-clock
  * boundary math, so the parity invariant holds for every cutover/timezone/DST:
  *   - `businessDayKey(fromIso, cutoverHour, tz) === fromKey`
  *   - the last instant before `toIso` maps to `toKey`
@@ -61,12 +61,19 @@ export function businessDayRange(
 }
 
 /**
- * The UTC instant at which business-day `key` begins: local (`tz`) midnight of
- * `key` plus `cutoverHour` real hours. Absolute-hour addition exactly inverts
- * `businessDayKey`'s absolute-hour subtraction (DST-safe per instant).
+ * The UTC instant at which business-day `key` begins: the local (`tz`)
+ * **wall-clock** instant `key` at `cutoverHour:00` (a cutover-6 day starts at
+ * 06:00 local). Constructing the cutover wall-clock directly and letting the tz
+ * plugin resolve its real UTC offset is the exact inverse of
+ * {@link businessDayKey}'s wall-clock subtraction — so the parity invariant
+ * holds on normal AND DST days. (The earlier "local midnight + cutoverHour
+ * absolute hours" form crossed the DST offset boundary on the spring-forward
+ * day and landed one hour late: 04:00Z instead of the correct 03:00Z on
+ * 2026-04-24.)
  */
 function businessDayStartIso(key: string, cutoverHour: number, tz: string): string {
-  return dayjs.tz(key, tz).add(cutoverHour, 'hour').utc().toISOString();
+  const hh = String(cutoverHour).padStart(2, '0');
+  return dayjs.tz(`${key}T${hh}:00:00`, tz).utc().toISOString();
 }
 
 /**

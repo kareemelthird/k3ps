@@ -21,13 +21,18 @@
 --     defense-in-depth gate behind the /dashboard/reports route gate (Decision 8).
 --
 -- Fixture revenue fingerprints (piastres):
---   Tenant-A: 1 closed session (grand_total=6500, cash) +
---             1 walk-in order (total=1500, cash)  → gross total = 8000
---   Tenant-B: 1 closed session (grand_total=9999, cash) +
---             1 walk-in order (total=9000, cash)  → gross total = 18999
---   If B-data leaks into A-owner's RPC result, the sum assertion (8000) fails.
+--   Tenant-A (all visible to owner_a via is_tenant_owner()):
+--     session aaaaaaaa-se01 (manager_id=owner_a,   grand_total=6500, cash)
+--     walk-in aaaaaaaa-ow01 (manager_id=owner_a,   total=1500,       cash, Pepsi Can ×3)
+--     session aaaaaaaa-se02 (manager_id=manager_a, grand_total=5000, cash)  ← Block C fixture
+--     walk-in aaaaaaaa-ow02 (manager_id=manager_a, total=800,        cash, Mineral Water ×2) ← Block C
+--     shift   aaaaaaaa-sf01 (manager_id=owner_a)
+--     shift   aaaaaaaa-sf02 (manager_id=manager_a)                         ← Block C fixture
+--   Tenant-A gross total = 6500 + 1500 + 5000 + 800 = 13800
+--   Tenant-B: 1 closed session (grand_total=9999) + 1 walk-in (total=9000) → 18999
+--   If B-data leaks into A-owner's RPC result, the sum assertion (13800) fails.
 --
--- Plan: 15 tests.
+-- Plan: 15 tests (5 Block A + 5 Block B + 5 Block C).
 -- Depends on seed.sql (Tenant A = aaaaaaaa…, Tenant B = bbbbbbbb…).
 -- All fixture writes are inside this transaction and rolled back at the end.
 -- Run: npx supabase test db  (local Supabase stack / Docker, or CI).
@@ -150,6 +155,73 @@ values
 on conflict (id) do nothing;
 
 -- ---------------------------------------------------------------------------
+-- BLOCK C additional fixtures: Tenant-A rows owned by MANAGER_A
+-- (manager_id = …000000000002 = manager_a).
+--
+-- WHY THESE ARE REQUIRED (security NB-1):
+--   The base-table RLS for sessions/orders/shifts is:
+--     tenant_id = current_tenant_id() AND (manager_id = auth.uid() OR is_tenant_owner())
+--   When manager_a is the JWT context, rows with manager_id=owner_a are hidden
+--   by RLS — so the original Block C tests returned 0 even if the in-function
+--   is_tenant_owner() gate were deleted.  These fixtures have manager_id=manager_a,
+--   so base-table RLS *allows* manager_a to read them; only the in-function
+--   is_tenant_owner() predicate can now produce the expected 0-row result.
+-- ---------------------------------------------------------------------------
+
+-- Tenant-A closed session owned by manager_a (Block C regression fixture)
+insert into public.sessions
+  (id, tenant_id, branch_id, device_id, manager_id,
+   billing_mode, status,
+   started_at, ended_at,
+   time_total, orders_total, grand_total, discount, payment_method)
+values
+  ('aaaaaaaa-se02-4000-8000-000000000007',
+   'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
+   'aaaaaaaa-de01-4000-8000-000000000001',
+   '00000000-0000-4000-8000-000000000002',   -- manager_a
+   'open', 'closed',
+   '2026-06-01 08:30:00+00', '2026-06-01 09:30:00+00',
+   4800, 200, 5000, 0, 'cash')
+on conflict (id) do nothing;
+
+-- Tenant-A walk-in paid order owned by manager_a (Block C regression fixture)
+insert into public.orders
+  (id, tenant_id, branch_id, manager_id, total, status, payment_method, created_at)
+values
+  ('aaaaaaaa-ow02-4000-8000-000000000007',
+   'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
+   '00000000-0000-4000-8000-000000000002',   -- manager_a
+   800, 'paid', 'cash', '2026-06-01 11:00:00+00')
+on conflict (id) do nothing;
+
+-- Non-void order_item on manager_a's walk-in order (makes report_top_products testable)
+insert into public.order_items
+  (id, tenant_id, order_id, product_id, qty, unit_price, is_void)
+values
+  ('aaaaaaaa-oi07-4000-8000-000000000002',
+   'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'aaaaaaaa-ow02-4000-8000-000000000007',
+   'aaaaaaaa-c0de-4000-8000-000000000002',   -- Mineral Water (A catalog)
+   2, 400, false)
+on conflict (id) do nothing;
+
+-- Tenant-A closed shift owned by manager_a (Block C regression fixture)
+insert into public.shifts
+  (id, tenant_id, branch_id, manager_id,
+   opened_at, closed_at,
+   opening_cash, expected_cash, actual_cash, difference, status)
+values
+  ('aaaaaaaa-sf02-4000-8000-000000000007',
+   'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
+   '00000000-0000-4000-8000-000000000002',   -- manager_a
+   '2026-06-01 18:00:00+00', '2026-06-01 22:00:00+00',
+   30000, 35800, 35800, 0, 'closed')
+on conflict (id) do nothing;
+
+-- ---------------------------------------------------------------------------
 -- Switch to Tenant-A OWNER (Owner Alpha) — is_tenant_owner() = true
 -- ---------------------------------------------------------------------------
 select set_config(
@@ -173,7 +245,8 @@ set local role authenticated;
 -- p_cutover = 6 (matches seed business_day setting for both tenants).
 -- ===========================================================================
 
--- 1. report_revenue_by_day: gross sum must equal A-only total (8000).
+-- 1. report_revenue_by_day: gross sum must equal A-only total (13800).
+--    A has: session se01 (6500) + walk-in ow01 (1500) + session se02 (5000) + walk-in ow02 (800) = 13800.
 --    B's gross (9999+9000=18999) would raise this number if leaked.
 select is(
   (select coalesce(sum(gross), 0)
@@ -181,8 +254,8 @@ select is(
      '2026-01-01 00:00:00+00'::timestamptz,
      '2027-01-01 00:00:00+00'::timestamptz,
      null, 6)),
-  8000::bigint,
-  'report_revenue_by_day: A-owner sum(gross)=8000 — only A rows included (B excluded)');
+  13800::bigint,
+  'report_revenue_by_day: A-owner sum(gross)=13800 — only A rows included (B excluded)');
 
 -- 2. report_by_device: A has 2 devices (seed); B has 2. Only A's 2 visible.
 --    Count=4 would indicate B device rows leaked.
@@ -195,18 +268,18 @@ select is(
   2::bigint,
   'report_by_device: A-owner count=2 (A devices only; B devices excluded)');
 
--- 3. report_top_products: A sold Pepsi Can (1 distinct product).
---    B sold Coca Cola. Count=2 would indicate B product row leaked.
+-- 3. report_top_products: A sold 2 distinct products (Pepsi Can via ow01, Mineral Water via ow02).
+--    B sold Coca Cola. Count=3 would indicate a B product row leaked.
 select is(
   (select count(*)
    from public.report_top_products(
      '2026-01-01 00:00:00+00'::timestamptz,
      '2027-01-01 00:00:00+00'::timestamptz,
      null, 6)),
-  1::bigint,
-  'report_top_products: A-owner count=1 (A product only; B product excluded)');
+  2::bigint,
+  'report_top_products: A-owner count=2 (Pepsi Can + Mineral Water; B product excluded)');
 
--- 4. report_payment_mix: A cash total = 8000 (session 6500 + walk-in 1500).
+-- 4. report_payment_mix: A cash total = 13800 (se01:6500 + ow01:1500 + se02:5000 + ow02:800).
 --    B cash total would be 18999 if leaked.
 select is(
   (select coalesce(sum(amount), 0)
@@ -214,19 +287,19 @@ select is(
      '2026-01-01 00:00:00+00'::timestamptz,
      '2027-01-01 00:00:00+00'::timestamptz,
      null, 6)),
-  8000::bigint,
-  'report_payment_mix: A-owner sum(amount)=8000 — only A settlements included');
+  13800::bigint,
+  'report_payment_mix: A-owner sum(amount)=13800 — only A settlements included');
 
--- 5. report_shifts: A has 1 closed shift; B has 1. Only A's is visible.
---    Count=2 would indicate B shift leaked.
+-- 5. report_shifts: A has 2 closed shifts (sf01 owned by owner_a, sf02 owned by manager_a);
+--    B has 1. Count=3 would indicate a B shift leaked.
 select is(
   (select count(*)
    from public.report_shifts(
      '2026-01-01 00:00:00+00'::timestamptz,
      '2027-01-01 00:00:00+00'::timestamptz,
      null, 6)),
-  1::bigint,
-  'report_shifts: A-owner count=1 (A shift only; B shift excluded)');
+  2::bigint,
+  'report_shifts: A-owner count=2 (sf01+sf02; B shift excluded)');
 
 -- ===========================================================================
 -- BLOCK B — Branch-filter isolation: A-owner + p_branch = B's branch (tests 6–10)
@@ -290,6 +363,13 @@ select is(
 -- ===========================================================================
 -- BLOCK C — Owner gate: manager (non-owner) calling any RPC gets 0 rows
 -- (ADR-0007 Decision 8: is_tenant_owner() in each function's WHERE clause)
+--
+-- The regression fixtures above (aaaaaaaa-se02/ow02/sf02/oi07-…-000000000007)
+-- are owned by manager_a (manager_id = …000000000002).  Base-table RLS allows
+-- manager_a to read their own rows via the manager_id = auth.uid() branch.
+-- Therefore, if the in-function is_tenant_owner() gate were deleted, these
+-- fixtures would produce non-zero rows — turning the tests into genuine
+-- regression guards for ADR-0007 Decision 8.
 -- ===========================================================================
 
 -- Switch JWT to Manager Alpha (same Tenant A, role='manager').
@@ -308,7 +388,9 @@ select set_config(
   true
 );
 
--- 11. report_revenue_by_day: manager gets 0 rows (owner gate rejects)
+-- 11. report_revenue_by_day: manager gets 0 rows despite owning fixtures in range.
+--     If is_tenant_owner() were removed from the function body, the manager_a-owned
+--     session (grand_total=5000) and walk-in order (total=800) would appear.
 select is(
   (select count(*)
    from public.report_revenue_by_day(
@@ -316,9 +398,11 @@ select is(
      '2027-01-01 00:00:00+00'::timestamptz,
      null, 6)),
   0::bigint,
-  'report_revenue_by_day: manager (non-owner) gets 0 rows — is_tenant_owner() gate');
+  'report_revenue_by_day: manager owns fixtures in range but in-function is_tenant_owner() gate returns 0');
 
--- 12. report_by_device: manager gets 0 rows (owner gate rejects)
+-- 12. report_by_device: manager gets 0 rows.
+--     Devices are staff-readable (no manager_id column); the in-function gate
+--     is the sole blocker here too — always was (no base-table ambiguity).
 select is(
   (select count(*)
    from public.report_by_device(
@@ -326,9 +410,10 @@ select is(
      '2027-01-01 00:00:00+00'::timestamptz,
      null, 6)),
   0::bigint,
-  'report_by_device: manager (non-owner) gets 0 rows — is_tenant_owner() gate');
+  'report_by_device: manager (non-owner) gets 0 rows — in-function is_tenant_owner() gate');
 
--- 13. report_top_products: manager gets 0 rows (owner gate rejects)
+-- 13. report_top_products: manager gets 0 rows despite owning the walk-in order
+--     (aaaaaaaa-ow02) whose order_item (Mineral Water × 2) is in range.
 select is(
   (select count(*)
    from public.report_top_products(
@@ -336,9 +421,9 @@ select is(
      '2027-01-01 00:00:00+00'::timestamptz,
      null, 6)),
   0::bigint,
-  'report_top_products: manager (non-owner) gets 0 rows — is_tenant_owner() gate');
+  'report_top_products: manager owns order_item in range but in-function is_tenant_owner() gate returns 0');
 
--- 14. report_payment_mix: manager gets 0 rows (owner gate rejects)
+-- 14. report_payment_mix: manager gets 0 rows despite owning session + walk-in fixtures.
 select is(
   (select count(*)
    from public.report_payment_mix(
@@ -346,9 +431,9 @@ select is(
      '2027-01-01 00:00:00+00'::timestamptz,
      null, 6)),
   0::bigint,
-  'report_payment_mix: manager (non-owner) gets 0 rows — is_tenant_owner() gate');
+  'report_payment_mix: manager owns fixtures in range but in-function is_tenant_owner() gate returns 0');
 
--- 15. report_shifts: manager gets 0 rows (owner gate rejects)
+-- 15. report_shifts: manager gets 0 rows despite owning the shift (aaaaaaaa-sf02).
 select is(
   (select count(*)
    from public.report_shifts(
@@ -356,7 +441,7 @@ select is(
      '2027-01-01 00:00:00+00'::timestamptz,
      null, 6)),
   0::bigint,
-  'report_shifts: manager (non-owner) gets 0 rows — is_tenant_owner() gate');
+  'report_shifts: manager owns shift in range but in-function is_tenant_owner() gate returns 0');
 
 select * from finish();
 rollback;

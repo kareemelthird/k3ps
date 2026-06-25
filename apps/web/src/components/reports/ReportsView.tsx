@@ -95,9 +95,8 @@ function computeKpiTotals(
 
   const cashRow = paymentMix.find((r) => r.payment_method === 'cash');
   const cashRevenue = cashRow?.amount ?? 0;
-  const grossForCashPct = totals.gross;
 
-  return { ...totals, cashRevenue, grossForCashPct };
+  return { ...totals, cashRevenue };
 }
 
 // ── ReportsView ───────────────────────────────────────────────────────────────

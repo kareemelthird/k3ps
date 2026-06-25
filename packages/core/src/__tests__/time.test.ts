@@ -356,3 +356,50 @@ describe('businessDayKey', () => {
     expect(businessDayKey(iso)).toBe(businessDayKey(iso));
   });
 });
+
+// ─── businessDayKey — DST boundary parity with the SQL wall-clock label ───────
+//
+// The authoritative business-day definition is the SQL reporting expression
+// (migration 0007):
+//   ((anchor AT TIME ZONE 'Africa/Cairo') - make_interval(hours => cutover))::date
+// i.e. the Cairo WALL-CLOCK minus the cutover as a plain (DST-free) interval.
+// businessDayKey must equal that for every instant, including the cutover hour
+// of Egypt's DST days. Egypt 2026 transitions (IANA Africa/Cairo):
+//   * spring-forward: 2026-04-24, local 00:00 jumps to 01:00 (UTC+2 → UTC+3),
+//     so local 00:00–00:59 does not exist.
+//   * fall-back:      last-Fri-Oct, local clocks step back (UTC+3 → UTC+2).
+// The expected keys below are HAND-COMPUTED from the SQL wall-clock expression
+// (take the Cairo local time shown, subtract 6h on the clock, take the date).
+describe('businessDayKey — DST wall-clock parity (regression for the spring-forward blocker)', () => {
+  // [instant UTC, Cairo wall-clock, expected businessDayKey @ cutover 6]
+  const cases: Array<[string, string, string]> = [
+    // Normal summer day — just before / just after the 06:00 cutover.
+    ['2026-06-12T02:59:00.000Z', '05:59', '2026-06-11'],
+    ['2026-06-12T03:00:00.000Z', '06:00', '2026-06-12'],
+    // DST SPRING-FORWARD day (2026-04-24). The bug: absolute-hour subtraction
+    // crossed the UTC+2→UTC+3 boundary and returned 2026-04-23 for 06:30 local.
+    ['2026-04-24T02:59:00.000Z', '05:59', '2026-04-23'], // before cutover
+    ['2026-04-24T03:00:00.000Z', '06:00', '2026-04-24'], // exactly at cutover
+    ['2026-04-24T03:30:00.000Z', '06:30', '2026-04-24'], // first cutover hour — was WRONG
+    ['2026-04-24T00:00:00.000Z', '03:00', '2026-04-23'], // late-night, prev day
+    // DST FALL-BACK day (2026-10-30) — before / at the 06:00 cutover.
+    ['2026-10-30T03:30:00.000Z', '05:30', '2026-10-29'],
+    ['2026-10-30T04:00:00.000Z', '06:00', '2026-10-30'],
+    // UTC-vs-Cairo calendar-boundary instant: 00:30 Cairo (UTC day differs).
+    ['2026-06-10T21:30:00.000Z', '00:30', '2026-06-10'],
+  ];
+
+  for (const [iso, local, expected] of cases) {
+    test(`${iso} (Cairo ${local}) → ${expected}`, () => {
+      expect(localHm(iso)).toBe(local);
+      expect(businessDayKey(iso)).toBe(expected);
+    });
+  }
+
+  test('AT the cutover hour on the spring-forward day, a 06:00–06:59 Cairo instant keys to 2026-04-24', () => {
+    // 06:00 Cairo (UTC+3) = 03:00Z; 06:59 Cairo = 03:59Z. Both must key to the
+    // spring-forward business day itself, never the day before.
+    expect(businessDayKey('2026-04-24T03:00:00.000Z')).toBe('2026-04-24');
+    expect(businessDayKey('2026-04-24T03:59:00.000Z')).toBe('2026-04-24');
+  });
+});

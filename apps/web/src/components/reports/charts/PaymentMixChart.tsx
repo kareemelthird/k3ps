@@ -8,7 +8,7 @@
 
 import { useTranslations } from 'next-intl';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { formatEgp } from '@ps/core';
+import { formatEgp, toArabicDigits } from '@ps/core';
 import type { PaymentMixRow } from '../types';
 
 // Chart color tokens (design-system §10)
@@ -44,8 +44,9 @@ export function PaymentMixChart({ data, height = 240 }: PaymentMixChartProps) {
     const num = typeof value === 'number' ? value : 0;
     const key = String(name ?? '');
     const slice = slices.find((s) => s.name === key);
-    const pct = total > 0 ? ((num / total) * 100).toFixed(1) : '0';
-    return [`${formatEgp(num)} (${pct}%)`, slice?.label ?? key];
+    const pctRaw = total > 0 ? ((num / total) * 100).toFixed(1) : '0.0';
+    const pct = toArabicDigits(pctRaw);
+    return [`${formatEgp(num)} (${pct}٪)`, slice?.label ?? key];
   };
 
   return (

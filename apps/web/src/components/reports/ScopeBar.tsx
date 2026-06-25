@@ -17,7 +17,7 @@ import type { Scope } from './types';
 function formatDateKeyAr(key: string): string {
   const d = new Date(`${key}T00:00:00Z`);
   return toArabicDigits(
-    new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'long' }).format(d),
+    new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'long', timeZone: 'Africa/Cairo' }).format(d),
   );
 }
 
