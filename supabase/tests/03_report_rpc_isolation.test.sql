@@ -22,12 +22,12 @@
 --
 -- Fixture revenue fingerprints (piastres):
 --   Tenant-A (all visible to owner_a via is_tenant_owner()):
---     session aaaaaaaa-se01 (manager_id=owner_a,   grand_total=6500, cash)
---     walk-in aaaaaaaa-ow01 (manager_id=owner_a,   total=1500,       cash, Pepsi Can ×3)
---     session aaaaaaaa-se02 (manager_id=manager_a, grand_total=5000, cash)  ← Block C fixture
---     walk-in aaaaaaaa-ow02 (manager_id=manager_a, total=800,        cash, Mineral Water ×2) ← Block C
---     shift   aaaaaaaa-sf01 (manager_id=owner_a)
---     shift   aaaaaaaa-sf02 (manager_id=manager_a)                         ← Block C fixture
+--     session aaaaaaaa-5e01 (manager_id=owner_a,   grand_total=6500, cash)
+--     walk-in aaaaaaaa-0a01 (manager_id=owner_a,   total=1500,       cash, Pepsi Can ×3)
+--     session aaaaaaaa-5e02 (manager_id=manager_a, grand_total=5000, cash)  ← Block C fixture
+--     walk-in aaaaaaaa-0a02 (manager_id=manager_a, total=800,        cash, Mineral Water ×2) ← Block C
+--     shift   aaaaaaaa-5f01 (manager_id=owner_a)
+--     shift   aaaaaaaa-5f02 (manager_id=manager_a)                         ← Block C fixture
 --   Tenant-A gross total = 6500 + 1500 + 5000 + 800 = 13800
 --   Tenant-B: 1 closed session (grand_total=9999) + 1 walk-in (total=9000) → 18999
 --   If B-data leaks into A-owner's RPC result, the sum assertion (13800) fails.
@@ -54,7 +54,7 @@ insert into public.sessions
    started_at, ended_at,
    time_total, orders_total, grand_total, discount, payment_method)
 values
-  ('aaaaaaaa-se01-4000-8000-000000000007',
+  ('aaaaaaaa-5e01-4000-8000-000000000007',
    'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
    'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
    'aaaaaaaa-de01-4000-8000-000000000001',
@@ -71,7 +71,7 @@ insert into public.sessions
    started_at, ended_at,
    time_total, orders_total, grand_total, discount, payment_method)
 values
-  ('bbbbbbbb-se01-4000-8000-000000000007',
+  ('bbbbbbbb-5e01-4000-8000-000000000007',
    'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb',
    'bbbb0001-0000-4000-8000-bbbbbbbbbbbb',
    'bbbbbbbb-de01-4000-8000-000000000001',
@@ -85,7 +85,7 @@ on conflict (id) do nothing;
 insert into public.orders
   (id, tenant_id, branch_id, manager_id, total, status, payment_method, created_at)
 values
-  ('aaaaaaaa-ow01-4000-8000-000000000007',
+  ('aaaaaaaa-0a01-4000-8000-000000000007',
    'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
    'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
    '00000000-0000-4000-8000-000000000001',
@@ -96,7 +96,7 @@ on conflict (id) do nothing;
 insert into public.orders
   (id, tenant_id, branch_id, manager_id, total, status, payment_method, created_at)
 values
-  ('bbbbbbbb-ow01-4000-8000-000000000007',
+  ('bbbbbbbb-0a01-4000-8000-000000000007',
    'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb',
    'bbbb0001-0000-4000-8000-bbbbbbbbbbbb',
    '00000000-0000-4000-8000-000000000003',
@@ -107,9 +107,9 @@ on conflict (id) do nothing;
 insert into public.order_items
   (id, tenant_id, order_id, product_id, qty, unit_price, is_void)
 values
-  ('aaaaaaaa-oi07-4000-8000-000000000001',
+  ('aaaaaaaa-0107-4000-8000-000000000001',
    'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
-   'aaaaaaaa-ow01-4000-8000-000000000007',
+   'aaaaaaaa-0a01-4000-8000-000000000007',
    'aaaaaaaa-c0de-4000-8000-000000000001',
    3, 500, false)
 on conflict (id) do nothing;
@@ -119,9 +119,9 @@ on conflict (id) do nothing;
 insert into public.order_items
   (id, tenant_id, order_id, product_id, qty, unit_price, is_void)
 values
-  ('bbbbbbbb-oi07-4000-8000-000000000001',
+  ('bbbbbbbb-0107-4000-8000-000000000001',
    'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb',
-   'bbbbbbbb-ow01-4000-8000-000000000007',
+   'bbbbbbbb-0a01-4000-8000-000000000007',
    'bbbbbbbb-c0de-4000-8000-000000000001',
    15, 600, false)
 on conflict (id) do nothing;
@@ -132,7 +132,7 @@ insert into public.shifts
    opened_at, closed_at,
    opening_cash, expected_cash, actual_cash, difference, status)
 values
-  ('aaaaaaaa-sf01-4000-8000-000000000007',
+  ('aaaaaaaa-5f01-4000-8000-000000000007',
    'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
    'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
    '00000000-0000-4000-8000-000000000001',
@@ -146,7 +146,7 @@ insert into public.shifts
    opened_at, closed_at,
    opening_cash, expected_cash, actual_cash, difference, status)
 values
-  ('bbbbbbbb-sf01-4000-8000-000000000007',
+  ('bbbbbbbb-5f01-4000-8000-000000000007',
    'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb',
    'bbbb0001-0000-4000-8000-bbbbbbbbbbbb',
    '00000000-0000-4000-8000-000000000003',
@@ -175,7 +175,7 @@ insert into public.sessions
    started_at, ended_at,
    time_total, orders_total, grand_total, discount, payment_method)
 values
-  ('aaaaaaaa-se02-4000-8000-000000000007',
+  ('aaaaaaaa-5e02-4000-8000-000000000007',
    'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
    'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
    'aaaaaaaa-de01-4000-8000-000000000001',
@@ -189,7 +189,7 @@ on conflict (id) do nothing;
 insert into public.orders
   (id, tenant_id, branch_id, manager_id, total, status, payment_method, created_at)
 values
-  ('aaaaaaaa-ow02-4000-8000-000000000007',
+  ('aaaaaaaa-0a02-4000-8000-000000000007',
    'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
    'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
    '00000000-0000-4000-8000-000000000002',   -- manager_a
@@ -200,9 +200,9 @@ on conflict (id) do nothing;
 insert into public.order_items
   (id, tenant_id, order_id, product_id, qty, unit_price, is_void)
 values
-  ('aaaaaaaa-oi07-4000-8000-000000000002',
+  ('aaaaaaaa-0107-4000-8000-000000000002',
    'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
-   'aaaaaaaa-ow02-4000-8000-000000000007',
+   'aaaaaaaa-0a02-4000-8000-000000000007',
    'aaaaaaaa-c0de-4000-8000-000000000002',   -- Mineral Water (A catalog)
    2, 400, false)
 on conflict (id) do nothing;
@@ -213,7 +213,7 @@ insert into public.shifts
    opened_at, closed_at,
    opening_cash, expected_cash, actual_cash, difference, status)
 values
-  ('aaaaaaaa-sf02-4000-8000-000000000007',
+  ('aaaaaaaa-5f02-4000-8000-000000000007',
    'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
    'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
    '00000000-0000-4000-8000-000000000002',   -- manager_a
@@ -246,7 +246,7 @@ set local role authenticated;
 -- ===========================================================================
 
 -- 1. report_revenue_by_day: gross sum must equal A-only total (13800).
---    A has: session se01 (6500) + walk-in ow01 (1500) + session se02 (5000) + walk-in ow02 (800) = 13800.
+--    A has: session 5e01 (6500) + walk-in 0a01 (1500) + session 5e02 (5000) + walk-in 0a02 (800) = 13800.
 --    B's gross (9999+9000=18999) would raise this number if leaked.
 select is(
   (select coalesce(sum(gross), 0)
@@ -268,7 +268,7 @@ select is(
   2::bigint,
   'report_by_device: A-owner count=2 (A devices only; B devices excluded)');
 
--- 3. report_top_products: A sold 2 distinct products (Pepsi Can via ow01, Mineral Water via ow02).
+-- 3. report_top_products: A sold 2 distinct products (Pepsi Can via 0a01, Mineral Water via 0a02).
 --    B sold Coca Cola. Count=3 would indicate a B product row leaked.
 select is(
   (select count(*)
@@ -279,7 +279,7 @@ select is(
   2::bigint,
   'report_top_products: A-owner count=2 (Pepsi Can + Mineral Water; B product excluded)');
 
--- 4. report_payment_mix: A cash total = 13800 (se01:6500 + ow01:1500 + se02:5000 + ow02:800).
+-- 4. report_payment_mix: A cash total = 13800 (5e01:6500 + 0a01:1500 + 5e02:5000 + 0a02:800).
 --    B cash total would be 18999 if leaked.
 select is(
   (select coalesce(sum(amount), 0)
@@ -290,7 +290,7 @@ select is(
   13800::bigint,
   'report_payment_mix: A-owner sum(amount)=13800 — only A settlements included');
 
--- 5. report_shifts: A has 2 closed shifts (sf01 owned by owner_a, sf02 owned by manager_a);
+-- 5. report_shifts: A has 2 closed shifts (5f01 owned by owner_a, 5f02 owned by manager_a);
 --    B has 1. Count=3 would indicate a B shift leaked.
 select is(
   (select count(*)
@@ -299,7 +299,7 @@ select is(
      '2027-01-01 00:00:00+00'::timestamptz,
      null, 6)),
   2::bigint,
-  'report_shifts: A-owner count=2 (sf01+sf02; B shift excluded)');
+  'report_shifts: A-owner count=2 (5f01+5f02; B shift excluded)');
 
 -- ===========================================================================
 -- BLOCK B — Branch-filter isolation: A-owner + p_branch = B's branch (tests 6–10)
@@ -364,7 +364,7 @@ select is(
 -- BLOCK C — Owner gate: manager (non-owner) calling any RPC gets 0 rows
 -- (ADR-0007 Decision 8: is_tenant_owner() in each function's WHERE clause)
 --
--- The regression fixtures above (aaaaaaaa-se02/ow02/sf02/oi07-…-000000000007)
+-- The regression fixtures above (aaaaaaaa-5e02/0a02/5f02/0107-…-000000000007)
 -- are owned by manager_a (manager_id = …000000000002).  Base-table RLS allows
 -- manager_a to read their own rows via the manager_id = auth.uid() branch.
 -- Therefore, if the in-function is_tenant_owner() gate were deleted, these
@@ -413,7 +413,7 @@ select is(
   'report_by_device: manager (non-owner) gets 0 rows — in-function is_tenant_owner() gate');
 
 -- 13. report_top_products: manager gets 0 rows despite owning the walk-in order
---     (aaaaaaaa-ow02) whose order_item (Mineral Water × 2) is in range.
+--     (aaaaaaaa-0a02) whose order_item (Mineral Water × 2) is in range.
 select is(
   (select count(*)
    from public.report_top_products(
@@ -433,7 +433,7 @@ select is(
   0::bigint,
   'report_payment_mix: manager owns fixtures in range but in-function is_tenant_owner() gate returns 0');
 
--- 15. report_shifts: manager gets 0 rows despite owning the shift (aaaaaaaa-sf02).
+-- 15. report_shifts: manager gets 0 rows despite owning the shift (aaaaaaaa-5f02).
 select is(
   (select count(*)
    from public.report_shifts(
