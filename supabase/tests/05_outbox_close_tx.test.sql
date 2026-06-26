@@ -128,6 +128,14 @@ select diag('PROBE staff=' || coalesce((select public.is_tenant_staff())::text,'
   || ' tenant=' || coalesce((select public.current_tenant_id())::text,'NULL')
   || ' uid=' || coalesce((select auth.uid())::text,'NULL'));
 select ok((select public.is_tenant_staff()), 'PROBE: manager_a is_tenant_staff() = true');
+-- Dump the LIVE audit_log policies (reveals restrictive/role/with_check surprises)
+select diag('AUDITPOL name=' || policyname || ' cmd=' || cmd
+  || ' permissive=' || permissive
+  || ' roles=' || array_to_string(roles, ',')
+  || ' check=' || coalesce(with_check, 'NULL'))
+from pg_policies where schemaname = 'public' and tablename = 'audit_log';
+select diag('AUDIT forcerls=' || (select relforcerowsecurity::text from pg_class where oid = 'public.audit_log'::regclass)
+  || ' has_insert_grant=' || has_table_privilege('authenticated', 'public.audit_log', 'INSERT')::text);
 select lives_ok(
   $$ insert into public.audit_log
        (id, tenant_id, branch_id, actor_id, action, entity, entity_id, amount, meta, created_at)
