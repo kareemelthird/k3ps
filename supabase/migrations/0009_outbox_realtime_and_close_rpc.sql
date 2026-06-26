@@ -253,7 +253,7 @@ begin
   -- predicate (e.g. a direct UPDATE from a bug): it rejects 'closed' → non-closed
   -- with errcode 23514 (permanent in classifyError → dead-letter fast).
   update public.sessions s set
-    status         = p_session_patch->>'status',
+    status         = (p_session_patch->>'status')::public.session_status,
     ended_at       = (p_session_patch->>'ended_at')::timestamptz,
     time_total     = (p_session_patch->>'time_total')::bigint,
     grand_total    = (p_session_patch->>'grand_total')::bigint,
