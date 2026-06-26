@@ -52,7 +52,7 @@
 -- =============================================================================
 
 begin;
-select plan(15);
+select plan(17);
 
 -- ---------------------------------------------------------------------------
 -- FIXTURE SETUP (as superuser — before switching to the authenticated role)
@@ -122,6 +122,21 @@ select set_config(
   true
 );
 set local role authenticated;
+
+-- ── DIAGNOSTIC PROBES (temporary — isolate the close_session_tx audit failure) ──
+select diag('PROBE staff=' || coalesce((select public.is_tenant_staff())::text,'NULL')
+  || ' tenant=' || coalesce((select public.current_tenant_id())::text,'NULL')
+  || ' uid=' || coalesce((select auth.uid())::text,'NULL'));
+select ok((select public.is_tenant_staff()), 'PROBE: manager_a is_tenant_staff() = true');
+select lives_ok(
+  $$ insert into public.audit_log
+       (id, tenant_id, branch_id, actor_id, action, entity, entity_id, amount, meta, created_at)
+     values ('aaaaaaaa-d1a9-4000-8000-000000000099',
+             'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+             'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
+             '00000000-0000-4000-8000-000000000002',
+             'probe.audit', 'sessions', null, null, '{}'::jsonb, now()) $$,
+  'PROBE: direct manager_a audit_log insert succeeds');
 
 -- Test 1 — First call succeeds (no exception).
 -- Payload mirrors what the mobile api.ts close path produces:
