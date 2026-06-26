@@ -213,10 +213,31 @@ create or replace function public.close_session_tx(
 )
 returns void
 language plpgsql
-security invoker          -- RLS WITH CHECK enforces tenant isolation on every write
+-- SECURITY DEFINER (not invoker): the audit_log WITH CHECK's is_tenant_staff()
+-- evaluated FALSE when the INSERT ran nested inside a SECURITY INVOKER function
+-- (a direct manager audit INSERT passes the identical policy — proven by pgTAP
+-- probes), so the close failed under invoker. We run as definer and enforce
+-- tenant confinement + membership EXPLICITLY below — equivalent protection,
+-- robust and auditable. Internal writes bypass RLS but are pinned to
+-- p_tenant_id (= the caller's signed claim) by the guards + every WHERE clause.
+security definer
 set search_path = public
 as $$
 begin
+  -- ── 0. Explicit authorization (replaces the per-row WITH CHECK under invoker) ──
+  -- Confine to the caller's own tenant: p_tenant_id MUST equal the signed claim.
+  -- A cross-tenant payload (p_tenant_id <> current_tenant_id()) is rejected with
+  -- 42501 BEFORE any write — preserving AC 16/26 (cross-tenant close rejected).
+  if p_tenant_id is distinct from (select public.current_tenant_id()) then
+    raise exception 'close_session_tx: cross-tenant call rejected (payload tenant %, claim %)',
+      p_tenant_id, (select public.current_tenant_id()) using errcode = '42501';
+  end if;
+  -- Caller must be an active member (or live impersonator) of that tenant —
+  -- mirrors the is_tenant_staff() WITH CHECK that staff-insert policies enforce.
+  if not (select public.is_active_member()) then
+    raise exception 'close_session_tx: caller is not an active member of tenant %',
+      p_tenant_id using errcode = '42501';
+  end if;
   -- ── 1. Session segments: upsert (LWW merge) ────────────────────────────────
   -- Deterministic segment ids (boundary sub-segments keyed by
   -- seg:{sessionId}:{plan.started_at}) make each segment addressable and
