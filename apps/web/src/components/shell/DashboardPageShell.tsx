@@ -70,7 +70,7 @@ export function DashboardPageShell({ children }: DashboardPageShellProps) {
   return (
     <div className="min-h-dvh bg-bg text-text">
       <TopBarSimple
-        tenantName={claim.tenant_id}
+        tenantName={claim.tenant_id ?? undefined}
         branches={branches}
         activeBranchId={activeBranchId}
         onBranchSelect={(id) => setActiveBranchId(id)}

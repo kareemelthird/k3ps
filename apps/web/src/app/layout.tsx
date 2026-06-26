@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
 import { AuthProvider } from '@/lib/auth/AuthContext';
+import { ImpersonationBannerHost } from '@/components/admin/ImpersonationBannerHost';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -27,7 +28,13 @@ export default async function RootLayout({
     <html lang={locale} dir="rtl" className="dark" suppressHydrationWarning>
       <body suppressHydrationWarning>
         <NextIntlClientProvider messages={messages} locale={locale}>
-          <AuthProvider>{children}</AuthProvider>
+          <AuthProvider>
+            {/* Safety-critical: renders impersonation banner + end/expired dialogs
+                whenever a super-admin is in an active impersonation session (AC 24–27).
+                Non-dismissible while impersonation is active (CLAUDE.md §2.2). */}
+            <ImpersonationBannerHost />
+            {children}
+          </AuthProvider>
         </NextIntlClientProvider>
       </body>
     </html>

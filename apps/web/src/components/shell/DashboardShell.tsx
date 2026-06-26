@@ -97,7 +97,7 @@ export function DashboardShell() {
   return (
     <div className="min-h-dvh bg-bg text-text">
       <TopBar
-        tenantName={claim.tenant_id}
+        tenantName={claim.tenant_id ?? undefined}
         branches={branches}
         activeBranchId={activeBranchId}
         onBranchSelect={handleBranchSelect}
@@ -127,7 +127,7 @@ export function DashboardShell() {
           />
         )}
 
-        {activeBranchId && claim && (
+        {activeBranchId && claim && claim.tenant_id && (
           <OwnerDevicesView
             key={activeBranchId}
             branchId={activeBranchId}

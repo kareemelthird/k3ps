@@ -1,5 +1,9 @@
 # Feature design — Super-Admin Console (tenant provisioning & management)
 
+> **Phase-7 update:** the **build-time** source of truth for this surface is now
+> `docs/design/phase-7-super-admin-portal.md`. This Phase-2 doc remains the originating rationale; where the
+> two differ (chrome = sidebar confirmed; Arabic-first now, bilingual reserved), **the Phase-7 doc wins**.
+
 > Surface: **web** (Next.js + shadcn/ui), platform-only. Tokens & primitives: `docs/design/design-system.md`.
 > Spec: `docs/specs/phase-2-tenant-foundation.md` (US: super_admin provisioning + suspend; AC H 37–39).
 > Sibling: impersonation flow → `docs/design/impersonation.md`.

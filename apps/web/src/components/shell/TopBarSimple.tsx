@@ -31,7 +31,8 @@ export function TopBarSimple({
   const { claim, signOut } = useAuth();
   const pathname = usePathname();
 
-  const isOwner = (claim?.roles.includes('owner') ?? false) || (claim?.is_super_admin ?? false);
+  // ADR-0008 Decision Q3: roles is a scalar; use === not .includes() (fail-closed).
+  const isOwner = (claim?.roles === 'owner') || (claim?.is_super_admin ?? false);
 
   const navItems = [
     { href: '/dashboard', label: t('nav.devices') },

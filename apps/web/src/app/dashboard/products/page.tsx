@@ -34,7 +34,8 @@ export default function ProductsPage() {
   }
 
   // Role gate: owner has write access; manager/staff get read-only list (AC A1).
-  const isOwner = claim.roles.includes('owner') || claim.is_super_admin;
+  // ADR-0008 Decision Q3: roles is scalar — use === not .includes() (fail-closed).
+  const isOwner = claim.roles === 'owner' || claim.is_super_admin;
 
   return (
     <DashboardPageShell>

@@ -1,16 +1,22 @@
 /**
- * suspend-tenant — Super-admin edge function
+ * reactivate-tenant — Super-admin edge function (ADR-0008 Decision Q6)
  *
- * Sets tenants.status='suspended' and writes an audit_log row.
- * Suspension takes immediate effect via is_active_member() gating —
- * no token-freshness dependency.
+ * Sets tenants.status='active' and writes audit_log tenant.reactivate.
+ * Mirror of suspend-tenant with single-responsibility (no overloaded toggle).
  *
  * Guard (Finding 4 fix): authority checked via profiles.is_platform_admin via the
  * service-role client — NOT from user.app_metadata (getUser() reflects
  * raw_app_meta_data which lacks is_super_admin; the hook injects that into the
  * JWT only). Fail-closed: DB row must be explicitly true.
  *
- * Body: { tenant_id: string, reason: string }
+ * Effect is immediate: is_active_member() joins tenants.status='active', so
+ * previously-suspended members regain access on their next request —
+ * no waiting for token expiry (same mechanism as suspension, just reversed).
+ *
+ * Audit taxonomy: tenant.reactivate (consistent with tenant.provision and
+ * tenant.suspend — ADR-0008 Decision Q6).
+ *
+ * Body: { tenant_id: string, reason: string }  // reason min 5 chars for audit
  *
  * SECURITY REVIEWER: Required sign-off on super-admin guard.
  */
@@ -34,10 +40,10 @@ serve(async (req: Request): Promise<Response> => {
     if (authErr || !user) return jsonError(401, 'Unauthenticated');
 
     // ── Step 2: Guard — check authority via authoritative DB record ─────────
-    // SECURITY FIX (Finding 4): profiles.is_platform_admin is the single source
-    // of truth for super-admin status. The JWT claim is_super_admin is injected
-    // by the hook at token issuance but is NOT stored back to raw_app_meta_data,
-    // so getUser() would never see it. We re-derive from the DB. Fail-closed.
+    // SECURITY FIX (Finding 4): profiles.is_platform_admin is the authoritative
+    // source. The JWT claim is_super_admin is injected by the hook at token
+    // issuance but is NOT stored back to raw_app_meta_data, so getUser() would
+    // never see it. We re-derive from the DB. Fail-closed.
     const serviceClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
@@ -53,37 +59,52 @@ serve(async (req: Request): Promise<Response> => {
       return jsonError(403, 'Forbidden: super_admin required');
     }
 
-    // ── Step 3: Parse and validate body ──────────────────────────────────────
+    // ── Step 3: Parse and validate request body ───────────────────────────────
     const body = (await req.json()) as { tenant_id?: string; reason?: string };
+
     if (!body.tenant_id) return jsonError(400, 'tenant_id is required');
     if (!body.reason || body.reason.trim().length < 5) {
       return jsonError(400, 'reason is required (min 5 chars) for audit trail');
     }
 
-    // ── Step 4: Update tenant status ─────────────────────────────────────────
+    // ── Step 4: Verify tenant exists ─────────────────────────────────────────
+    const { data: tenant } = await serviceClient
+      .from('tenants')
+      .select('id, status')
+      .eq('id', body.tenant_id)
+      .maybeSingle();
+
+    if (!tenant) return jsonError(404, 'Tenant not found');
+
+    // ── Step 5: Set status='active' ──────────────────────────────────────────
     const { error: updateErr } = await serviceClient
       .from('tenants')
-      .update({ status: 'suspended' })
+      .update({ status: 'active' })
       .eq('id', body.tenant_id);
 
-    if (updateErr) return jsonError(500, `Failed to suspend tenant: ${updateErr.message}`);
+    if (updateErr) {
+      return jsonError(500, `Failed to reactivate tenant: ${updateErr.message}`);
+    }
 
-    // ── Step 5: Write audit log ───────────────────────────────────────────────
+    // ── Step 6: Write audit_log tenant.reactivate ─────────────────────────────
     await serviceClient.from('audit_log').insert({
       tenant_id: body.tenant_id,
-      actor_id: user.id,
-      action: 'tenant.suspend',
-      entity: 'tenants',
+      actor_id:  user.id,
+      action:    'tenant.reactivate',
+      entity:    'tenants',
       entity_id: body.tenant_id,
-      meta: { reason: body.reason.trim() },
+      meta: {
+        reason:          body.reason.trim(),
+        previous_status: tenant.status,
+      },
     });
 
     return new Response(
-      JSON.stringify({ tenant_id: body.tenant_id, status: 'suspended' }),
+      JSON.stringify({ tenant_id: body.tenant_id, status: 'active' }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );
   } catch (err) {
-    console.error('suspend-tenant error:', err);
+    console.error('reactivate-tenant error:', err);
     return jsonError(500, 'Internal error');
   }
 });

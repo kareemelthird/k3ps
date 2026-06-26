@@ -1,5 +1,10 @@
 # Feature design — Super-Admin Impersonation (time-boxed, audited, visually unmistakable)
 
+> **Phase-7 update:** the **build-time** source of truth for impersonation UX is now
+> `docs/design/phase-7-super-admin-portal.md` §7 (start dialog · banner · end · expired interstitial), using
+> the new solid banner sub-tokens in `design-system.md` §2.4. This doc's UX invariants (unmistakable,
+> time-boxed, audited entry+exit pair, no silent path) are carried verbatim there.
+
 > Surface: **web** (Next.js + shadcn/ui), platform-only (`super_admin`). Tokens & primitives: `docs/design/design-system.md`.
 > Spec: `docs/specs/phase-2-tenant-foundation.md` (US: time-boxed audited impersonation; AC H **38–39**; hand-off §7: "impersonation must be visually unmistakable + audited").
 > Sibling: entry point lives on Tenant detail → `docs/design/super-admin-console.md` §3.3.

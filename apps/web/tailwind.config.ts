@@ -65,6 +65,15 @@ const config: Config = {
         warning: '#F59E0B',
         danger: '#EF4444',
         info: '#3B82F6',
+        // ── Phase-7 admin / impersonation tokens (design-system §2.4) ─────────
+        // platform: steel-indigo identity hue (sidebar, badge) — identity-only, never action
+        platform: 'var(--color-platform)',
+        'platform-surface': 'var(--color-platform-surface)',
+        // impersonation: V500 violet — safety-critical banner surface
+        'impersonation': '#8B5CF6',
+        'impersonation-surface': '#8B5CF6',
+        'on-impersonation': '#FFFFFF',
+        'impersonation-frame': '#8B5CF6',
       },
       // ── Typography scale (design-system.md §3.1) ─────────────────────────
       fontFamily: {

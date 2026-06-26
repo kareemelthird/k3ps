@@ -110,6 +110,42 @@ The trial allowed an owner-selectable accent. We keep that idea but **scope it t
 surfaces**, defaulting to `primary` teal; it never overrides status or impersonation tokens. (Deferred to
 the owner-settings phase; documented here so the token contract reserves it.)
 
+### 2.4 Platform & impersonation-banner tokens (Phase 7 — super-admin portal)
+
+The super-admin portal at `/admin` is a **platform-level context** that must read as a *different kind of
+place* from any tenant dashboard (spec §3 "clearly distinct"). It earns that distinction **structurally**
+first — a left **sidebar** shell (the tenant surfaces use a top bar), a persistent platform badge, and the
+unique nav set (Tenants / Audit) — and only **secondarily** by a single restrained identity hue. The brand
+stays one brand: the *action* accent in the portal is still `primary` teal; the steel `platform` hue is
+**identity only** (never an action, status, or chart color).
+
+**Primitive ramps (reference only)**
+
+```
+Steel (platform identity)   S300 #A5B4CF  S400 #818EAE  S500 #5E6E94  S600 #44557A
+Violet (already in §2.1)     V400 #A78BFA  V500 #8B5CF6  V600 #7C3AED  V700 #6D28D9
+```
+
+| Token | Dark (default) | Light | Use |
+|---|---|---|---|
+| `platform` | `S300 #A5B4CF` | `S500 #5E6E94` | **Admin chrome identity only** — sidebar active item, platform badge, header hairline. Never an action/status/chart color, never impersonation. |
+| `platform-surface` | `N800 #131A26` | `N50 #EEF2F6` | The admin sidebar / chrome surface (one step off the canvas so the shell reads as platform, not tenant). |
+| `impersonation-surface` | `V600 #7C3AED` | `V700 #6D28D9` | **Solid fill** of the impersonation banner. White text clears AA on both (≈5.3:1 / ≈6.5:1). |
+| `on-impersonation` | `#FFFFFF` | `#FFFFFF` | Text + icon on the impersonation banner fill. |
+| `impersonation-frame` | `V500 #8B5CF6` | `V500 #8B5CF6` | The 3px inset frame painted around the whole app shell while impersonating (belt-and-suspenders for "unmistakable"). |
+
+**Banner countdown states (no new tokens — reuse the alert palette):** the live remaining-time readout is
+`on-impersonation` white by default, recolored to `warning` amber under ~2 min and `danger` red under ~30s
+(weight/color change only — never a flashing animation; reduced-motion-safe, §5/§7).
+
+**Why violet, and why a *solid* fill here (departure from the calm palette by design):** the impersonation
+banner is a **safety control**, not calm chrome. Everywhere else the system uses tinted status fills
+(`${color}1A`) and reserves saturation for the one CTA; the banner deliberately breaks that rule with a
+**full-saturation violet bar** so the state is impossible to miss and cannot be confused with any tenant UI
+(`color-not-only` is still honoured — violet is backed by a persistent text label + the inset frame + a live
+countdown, four redundant signals). `impersonation` violet remains a **one-purpose color** (§2.2): it paints
+this banner/frame and nothing else.
+
 ---
 
 ## 3. Typography
