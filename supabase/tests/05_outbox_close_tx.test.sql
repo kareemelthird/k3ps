@@ -136,6 +136,11 @@ select diag('AUDITPOL name=' || policyname || ' cmd=' || cmd
 from pg_policies where schemaname = 'public' and tablename = 'audit_log';
 select diag('AUDIT forcerls=' || (select relforcerowsecurity::text from pg_class where oid = 'public.audit_log'::regclass)
   || ' has_insert_grant=' || has_table_privilege('authenticated', 'public.audit_log', 'INSERT')::text);
+-- Dump every trigger on audit_log + the stamp_impersonator source (LIVE)
+select diag('AUDITTRG ' || tgname || ' enabled=' || tgenabled || ' fn=' || tgfoid::regproc::text)
+from pg_trigger where tgrelid = 'public.audit_log'::regclass and not tgisinternal;
+select diag('STAMPFN ' || replace(pg_get_functiondef('public.stamp_impersonator()'::regprocedure), chr(10), ' | '));
+select diag('ACTIVEMBR ' || replace(pg_get_functiondef('public.is_active_member()'::regprocedure), chr(10), ' | '));
 select lives_ok(
   $$ insert into public.audit_log
        (id, tenant_id, branch_id, actor_id, action, entity, entity_id, amount, meta, created_at)
