@@ -150,4 +150,37 @@ export function businessDayKey(
   return dayjs.utc(naiveLocal).subtract(cutoverHour, 'hour').format('YYYY-MM-DD');
 }
 
+/**
+ * A bucketed, i18n-friendly relative-time token for "last synced N ago" style
+ * display (ADR-0009). Returns a **structured** token (unit + value), never a
+ * formatted string, so the UI layer localizes it (Arabic-first / Arabic-Indic)
+ * with no hardcoded English. Pure: both instants are passed in (no clock read).
+ */
+export interface RelativeTime {
+  unit: 'now' | 'seconds' | 'minutes' | 'hours' | 'days';
+  /** Whole count for the unit (0 when unit is 'now'). */
+  value: number;
+}
+
+/**
+ * Bucket the gap between `thenIso` (the past instant) and `nowIso` into a coarse
+ * relative-time token. A future or invalid `thenIso` clamps to `now`. Buckets:
+ *   < 10s      → now
+ *   < 60s      → seconds
+ *   < 60m      → minutes (rounded)
+ *   < 24h      → hours (rounded)
+ *   otherwise  → days (rounded)
+ */
+export function formatRelativeTime(nowIso: string, thenIso: string): RelativeTime {
+  const diffMs = Math.max(0, dayjs(nowIso).valueOf() - dayjs(thenIso).valueOf());
+  const seconds = Math.floor(diffMs / 1000);
+  if (seconds < 10) return { unit: 'now', value: 0 };
+  if (seconds < 60) return { unit: 'seconds', value: seconds };
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return { unit: 'minutes', value: minutes };
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return { unit: 'hours', value: hours };
+  return { unit: 'days', value: Math.round(hours / 24) };
+}
+
 export { dayjs };

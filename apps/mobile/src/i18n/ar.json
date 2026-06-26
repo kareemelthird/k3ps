@@ -129,7 +129,61 @@
   "sync": {
     "pending": "{{count}} في الانتظار",
     "online": "متصل",
-    "offline": "غير متصل"
+    "pendingTag": "في انتظار المزامنة",
+    "chip": {
+      "synced": "متزامن",
+      "syncing": "جارٍ المزامنة",
+      "offline": "غير متصل",
+      "attention": "تنبيه المزامنة",
+      "hint": "اضغط لعرض تفاصيل المزامنة"
+    },
+    "offline": {
+      "pendingLabel": "غير متصل — {{count}} عملية في الانتظار",
+      "pendingCount": "{{count}} في الانتظار"
+    },
+    "attention": {
+      "title": "{{countDisplay}} عمليات فشلت",
+      "label": "{{countDisplay}} عمليات كتابة فشلت — اضغط للمراجعة",
+      "tapToReview": "اضغط للمراجعة والإعادة"
+    },
+    "center": {
+      "title": "حالة المزامنة",
+      "allSynced": "كل البيانات محفوظة بنجاح",
+      "failedTitle": "فشل {{countDisplay}} عمليات",
+      "pendingTitle": "{{countDisplay}} في انتظار الإرسال",
+      "lastSynced": "آخر مزامنة: {{time}}",
+      "retryAll": "إعادة الكل",
+      "retry": "إعادة",
+      "discard": "تجاهل"
+    },
+    "discard": {
+      "title": "تجاهل العملية",
+      "confirm": "هل تريد تجاهل هذه العملية ({{table}})؟ لا يمكن التراجع عن هذا الإجراء.",
+      "confirmMoney": "تحذير: هذه عملية مالية ({{table}}). تجاهلها سيؤدي إلى فقدان بيانات مالية نهائياً. هل أنت متأكد؟",
+      "confirmBtn": "تجاهل نهائياً"
+    },
+    "entry": {
+      "attempts": "محاولات: {{countDisplay}}",
+      "blockedByParent": "محظور بسبب فشل عملية سابقة",
+      "tableSession": "جلسة",
+      "tableSegment": "مقطع جلسة",
+      "tableDevice": "جهاز",
+      "tableOrder": "طلب",
+      "tableOrderItem": "بند طلب",
+      "tableStockMovement": "حركة مخزون",
+      "tableShift": "وردية",
+      "tableAudit": "سجل تدقيق",
+      "tableCloseRpc": "إغلاق جلسة"
+    },
+    "gate": {
+      "shiftClose": "لا يمكن إغلاق الوردية — توجد عمليات في الانتظار أو فاشلة",
+      "shiftCloseConfirm": "جميع البيانات متزامنة — يمكن إغلاق الوردية"
+    },
+    "error": {
+      "drainFailed": "فشل إرسال البيانات — سيُعاد المحاولة تلقائياً",
+      "authExpired": "انتهت صلاحية الجلسة — سيُعاد تسجيل الدخول",
+      "permanent": "فشل نهائي — يرجى مراجعة سجل المزامنة"
+    }
   },
   "rate": {
     "perHour": "{{rate}} / ساعة",

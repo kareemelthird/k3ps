@@ -11,7 +11,8 @@
  * HARD RULES (CLAUDE.md §2 / ADR-0006):
  *   - On-hand ALWAYS via @ps/core computeLevels / the view — never ad-hoc.
  *   - Immutable ledger: inserts only (no updates/deletes to past movements).
- *   - Deterministic movement IDs: uuidv5 so retries upsert in-place.
+ *   - Client-generated movement IDs: uuidv4 (generated once, persisted by the
+ *     outbox; conflict:'ignore' makes replays a no-op).
  *   - Audit row per action (stock.restock / stock.adjust).
  *   - No service-role key.
  */
@@ -27,6 +28,7 @@ import {
 } from '@ps/core';
 
 import { supabase } from '../../lib/supabase';
+import { persistRow } from '../../lib/outbox';
 import { useAuth } from '../../stores/useAuth';
 import { orderKeys } from '../orders/api';
 
@@ -103,19 +105,17 @@ export function useRestock() {
   return useMutation({
     mutationFn: async (input: RestockInput) => {
       const now = nowIso();
-      // Use uuidv4 for new movement (not deterministic — each restock is
-      // a distinct real event). But use uuidv5 for the audit so the audit row
-      // is idempotent per movement.
       const movementId = uuidv4();
-      const amount =
-        input.productCost != null
-          ? input.delta * input.productCost
-          : null;
+      const amount = input.productCost != null ? input.delta * input.productCost : null;
 
-      // Insert stock movement.
-      const { error: mvErr } = await supabase
-        .from('stock_movements')
-        .insert({
+      // Enqueue stock movement (conflict:'ignore' = ON CONFLICT DO NOTHING — append-only ledger).
+      await persistRow({
+        localId: movementId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'stock_movements',
+        op: 'upsert',
+        payload: {
           id: movementId,
           tenant_id: input.tenantId,
           branch_id: input.branchId,
@@ -126,33 +126,33 @@ export function useRestock() {
           manager_id: input.managerId,
           note: input.note || null,
           created_at: now,
-        });
-      if (mvErr) throw mvErr;
+        },
+        conflict: 'ignore',
+      });
 
-      // Audit row (idempotent per movement id).
+      // Enqueue audit row (dependsOn movement so it never orphan-applies).
       const auditId = uuidv5(`stock-restock:${movementId}`, PS_UUID_NS);
-      const { error: auditErr } = await supabase
-        .from('audit_log')
-        .upsert(
-          {
-            id: auditId,
-            tenant_id: input.tenantId,
-            branch_id: input.branchId,
-            actor_id: input.managerId,
-            action: 'stock.restock',
-            entity: 'product',
-            entity_id: input.productId,
-            amount,
-            meta: {
-              movement_id: movementId,
-              delta: input.delta,
-              reason: 'restock',
-            },
-            created_at: now,
-          },
-          { onConflict: 'id' },
-        );
-      if (auditErr) throw auditErr;
+      await persistRow({
+        localId: auditId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'audit_log',
+        op: 'upsert',
+        payload: {
+          id: auditId,
+          tenant_id: input.tenantId,
+          branch_id: input.branchId,
+          actor_id: input.managerId,
+          action: 'stock.restock',
+          entity: 'product',
+          entity_id: input.productId,
+          amount,
+          meta: { movement_id: movementId, delta: input.delta, reason: 'restock' },
+          created_at: now,
+        },
+        conflict: 'ignore',
+        dependsOn: [movementId],
+      });
 
       return { movementId };
     },
@@ -192,14 +192,15 @@ export function useAdjustStock() {
     mutationFn: async (input: AdjustInput) => {
       const now = nowIso();
       const movementId = uuidv4();
-      const amount =
-        input.productCost != null
-          ? input.delta * input.productCost
-          : null;
+      const amount = input.productCost != null ? input.delta * input.productCost : null;
 
-      const { error: mvErr } = await supabase
-        .from('stock_movements')
-        .insert({
+      await persistRow({
+        localId: movementId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'stock_movements',
+        op: 'upsert',
+        payload: {
           id: movementId,
           tenant_id: input.tenantId,
           branch_id: input.branchId,
@@ -210,33 +211,32 @@ export function useAdjustStock() {
           manager_id: input.managerId,
           note: input.note || null,
           created_at: now,
-        });
-      if (mvErr) throw mvErr;
+        },
+        conflict: 'ignore',
+      });
 
       const auditId = uuidv5(`stock-adjust:${movementId}`, PS_UUID_NS);
-      const { error: auditErr } = await supabase
-        .from('audit_log')
-        .upsert(
-          {
-            id: auditId,
-            tenant_id: input.tenantId,
-            branch_id: input.branchId,
-            actor_id: input.managerId,
-            action: 'stock.adjust',
-            entity: 'product',
-            entity_id: input.productId,
-            amount,
-            meta: {
-              movement_id: movementId,
-              delta: input.delta,
-              reason: 'adjust',
-              note: input.note,
-            },
-            created_at: now,
-          },
-          { onConflict: 'id' },
-        );
-      if (auditErr) throw auditErr;
+      await persistRow({
+        localId: auditId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'audit_log',
+        op: 'upsert',
+        payload: {
+          id: auditId,
+          tenant_id: input.tenantId,
+          branch_id: input.branchId,
+          actor_id: input.managerId,
+          action: 'stock.adjust',
+          entity: 'product',
+          entity_id: input.productId,
+          amount,
+          meta: { movement_id: movementId, delta: input.delta, reason: 'adjust', note: input.note },
+          created_at: now,
+        },
+        conflict: 'ignore',
+        dependsOn: [movementId],
+      });
 
       return { movementId };
     },

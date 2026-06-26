@@ -3,6 +3,8 @@ export {
   WEEKEND_DAYS,
   DEFAULT_CUTOVER_HOUR,
   type DayType,
+  type RelativeTime,
+  formatRelativeTime,
   nowIso,
   elapsedMinutes,
   elapsedSeconds,

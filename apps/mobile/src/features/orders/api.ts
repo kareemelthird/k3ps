@@ -39,6 +39,7 @@ import {
 } from '@ps/core';
 
 import { supabase } from '../../lib/supabase';
+import { persistRow } from '../../lib/outbox';
 import { useAuth } from '../../stores/useAuth';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -268,28 +269,30 @@ export function useAddOrder() {
       }));
       const total = computeOrderTotal(lineInputs);
 
-      // Upsert the order.
-      const { error: orderErr } = await supabase
-        .from('orders')
-        .upsert(
-          {
-            id: orderId,
-            tenant_id: input.tenantId,
-            branch_id: input.branchId,
-            session_id: input.sessionId,
-            shift_id: input.shiftId,
-            manager_id: input.managerId,
-            total,
-            status: 'open',
-            payment_method: null,
-            created_at: now,
-            updated_at: now,
-          },
-          { onConflict: 'id' },
-        );
-      if (orderErr) throw orderErr;
+      // Phase 8: enqueue via outbox. Order first; items depend on order so they
+      // never orphan-apply. _syncSessionOrdersTotal removed — realtime updates it.
+      await persistRow({
+        localId: orderId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'orders',
+        op: 'upsert',
+        payload: {
+          id: orderId,
+          tenant_id: input.tenantId,
+          branch_id: input.branchId,
+          session_id: input.sessionId,
+          shift_id: input.shiftId,
+          manager_id: input.managerId,
+          total,
+          status: 'open',
+          payment_method: null,
+          created_at: now,
+          updated_at: now,
+        },
+        conflict: 'merge',
+      });
 
-      // Upsert each item. Deterministic id so retry == same row.
       const itemRows = input.items.map((i) => ({
         id: uuidv5(`item:${orderId}:${i.productId}`, PS_UUID_NS),
         tenant_id: input.tenantId,
@@ -303,17 +306,16 @@ export function useAddOrder() {
         updated_at: now,
       }));
 
-      const { error: itemsErr } = await supabase
-        .from('order_items')
-        .upsert(itemRows, { onConflict: 'id' });
-      if (itemsErr) throw itemsErr;
-
-      // If session-attached, update session.orders_total so the live grand_total
-      // stays correct (ADR-0005 / spec §B AC 9). We re-query all orders for the
-      // session and recompute instead of doing arithmetic to stay idempotent.
-      if (input.sessionId) {
-        await _syncSessionOrdersTotal(input.sessionId, input.tenantId);
-      }
+      await persistRow({
+        localId: `items:${orderId}`,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'order_items',
+        op: 'upsert',
+        payload: itemRows as Record<string, unknown>[],
+        conflict: 'merge',
+        dependsOn: [orderId],
+      });
 
       return { orderId, total };
     },
@@ -375,19 +377,25 @@ export function useVoidOrderItem() {
     mutationFn: async (input: VoidOrderItemInput) => {
       const now = nowIso();
       const lineAmount = input.qty * input.unitPrice;
+      const voidItemLocalId = uuidv5(`void-item:${input.itemId}`, PS_UUID_NS);
 
-      // 1. Mark the item voided.
-      const { error: voidErr } = await supabase
-        .from('order_items')
-        .update({ is_void: true, voided_at: now, updated_at: now })
-        .eq('id', input.itemId)
-        .eq('tenant_id', input.tenantId);
-      if (voidErr) throw voidErr;
+      // 1. Enqueue: mark item voided (idempotent — deterministic localId).
+      await persistRow({
+        localId: voidItemLocalId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'order_items',
+        op: 'update',
+        payload: { id: input.itemId, tenant_id: input.tenantId, is_void: true, voided_at: now, updated_at: now },
+        conflict: 'merge',
+      });
 
-      // 2. Re-fetch all items for the order and recompute total.
+      // 2. Read all items (supabase) to recompute order total.
+      //    Include id so we can treat the newly-voided item as voided even if the
+      //    outbox hasn't flushed yet. If offline this throws → void re-attempted online.
       const { data: allItems, error: itemsErr } = await supabase
         .from('order_items')
-        .select('qty, unit_price, is_void')
+        .select('id, qty, unit_price, is_void')
         .eq('order_id', input.orderId)
         .eq('tenant_id', input.tenantId);
       if (itemsErr) throw itemsErr;
@@ -396,58 +404,53 @@ export function useVoidOrderItem() {
         (allItems ?? []).map((i) => ({
           qty: i.qty,
           unit_price: i.unit_price,
-          is_void: i.is_void,
+          // Treat the voided item as voided even if the outbox hasn't flushed yet.
+          is_void: i.id === input.itemId ? true : i.is_void,
         })),
       );
 
-      const { error: orderUpdateErr } = await supabase
-        .from('orders')
-        .update({ total: newTotal, updated_at: now })
-        .eq('id', input.orderId)
-        .eq('tenant_id', input.tenantId);
-      if (orderUpdateErr) throw orderUpdateErr;
+      // 3. Enqueue: update order total (dependsOn void so ordering is preserved).
+      await persistRow({
+        localId: uuidv5(`void-order-total:${input.orderId}:${now}`, PS_UUID_NS),
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'orders',
+        op: 'update',
+        payload: { id: input.orderId, tenant_id: input.tenantId, total: newTotal, updated_at: now },
+        conflict: 'merge',
+        dependsOn: [voidItemLocalId],
+      });
 
-      // 3. Re-sync session orders_total.
-      if (input.sessionId) {
-        await _syncSessionOrdersTotal(input.sessionId, input.tenantId);
-      }
-
-      // 4. Audit log: order_item.void (deterministic id — idempotent).
+      // 4. Enqueue: audit log (dependsOn void).
       const auditId = uuidv5(`void-item:${input.itemId}`, PS_UUID_NS);
-      const { error: auditErr } = await supabase
-        .from('audit_log')
-        .upsert(
-          {
-            id: auditId,
-            tenant_id: input.tenantId,
-            branch_id: input.branchId,
-            actor_id: input.managerId,
-            action: 'order_item.void',
-            entity: 'order_item',
-            entity_id: input.itemId,
-            amount: lineAmount,
-            meta: {
-              order_id: input.orderId,
-              product_id: input.productId,
-              qty: input.qty,
-              unit_price: input.unitPrice,
-            },
-            created_at: now,
+      await persistRow({
+        localId: auditId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'audit_log',
+        op: 'upsert',
+        payload: {
+          id: auditId,
+          tenant_id: input.tenantId,
+          branch_id: input.branchId,
+          actor_id: input.managerId,
+          action: 'order_item.void',
+          entity: 'order_item',
+          entity_id: input.itemId,
+          amount: lineAmount,
+          meta: {
+            order_id: input.orderId,
+            product_id: input.productId,
+            qty: input.qty,
+            unit_price: input.unitPrice,
           },
-          { onConflict: 'id' },
-        );
-      if (auditErr) throw auditErr;
+          created_at: now,
+        },
+        conflict: 'ignore',
+        dependsOn: [voidItemLocalId],
+      });
 
-      // 5. Stock void offset — driven by the RECORDED sale movements for this
-      //    order_item, not the product's current tracked flag (SHOULD-FIX 2+3).
-      //    Query stock_movements where reason='sale' and order_id=input.orderId
-      //    and product_id=input.productId. Use offsettingVoids(@ps/core) to
-      //    compute the exact reversals. Movement ids are deterministic uuidv5
-      //    keyed from the original sale movement id → idempotent on retry.
-      //
-      //    This ensures Σ(sale)+Σ(void)=0 regardless of the current tracked flag:
-      //    if a product was tracked at sale but untracked later, the sale movements
-      //    still exist and the void will still reverse them.
+      // 5. Stock void offset (if the order was paid).
       if (input.orderStatus === 'paid') {
         const { data: saleMoves, error: saleMovErr } = await supabase
           .from('stock_movements')
@@ -459,13 +462,10 @@ export function useVoidOrderItem() {
         if (saleMovErr) throw saleMovErr;
 
         if (saleMoves && saleMoves.length > 0) {
-          // offsettingVoids negates each delta (sale=-qty → void=+qty).
           const voidDeltas = offsettingVoids(
             saleMoves.map((m) => ({ product_id: m.product_id, delta: m.delta })),
           );
           const voidRows = voidDeltas.map((v, idx) => ({
-            // Deterministic id: keyed from the original sale movement id so
-            // retrying this void writes the same row (upsert is idempotent).
             id: uuidv5(`stock-void:${saleMoves[idx]!.id}`, PS_UUID_NS),
             tenant_id: input.tenantId,
             branch_id: input.branchId,
@@ -477,10 +477,16 @@ export function useVoidOrderItem() {
             note: null,
             created_at: now,
           }));
-          const { error: mvErr } = await supabase
-            .from('stock_movements')
-            .upsert(voidRows, { onConflict: 'id' });
-          if (mvErr) throw mvErr;
+          await persistRow({
+            localId: uuidv5(`void-stock:${input.itemId}`, PS_UUID_NS),
+            tenantId: input.tenantId,
+            branchId: input.branchId,
+            table: 'stock_movements',
+            op: 'upsert',
+            payload: voidRows as Record<string, unknown>[],
+            conflict: 'ignore',
+            dependsOn: [voidItemLocalId],
+          });
         }
       }
 
@@ -541,23 +547,27 @@ export function usePayWalkInOrder() {
     mutationFn: async (input: PayWalkInOrderInput) => {
       const now = nowIso();
       const businessDay = businessDayKey(now, input.cutoverHour ?? 6);
+      const payLocalId = uuidv5(`order-pay:${input.orderId}`, PS_UUID_NS);
 
-      // 1. Mark paid.
-      const { error: payErr } = await supabase
-        .from('orders')
-        .update({
+      // 1. Enqueue: mark order paid.
+      await persistRow({
+        localId: payLocalId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'orders',
+        op: 'update',
+        payload: {
+          id: input.orderId,
+          tenant_id: input.tenantId,
           status: 'paid',
           payment_method: input.paymentMethod,
           updated_at: now,
-        })
-        .eq('id', input.orderId)
-        .eq('tenant_id', input.tenantId);
-      if (payErr) throw payErr;
+        },
+        conflict: 'merge',
+      });
 
-      // 2. Stock sale movements for tracked non-void lines.
-      const trackedLines = input.items.filter(
-        (i) => !i.isVoid && i.isTracked,
-      );
+      // 2. Enqueue: stock sale movements for tracked non-void lines (dependsOn pay).
+      const trackedLines = input.items.filter((i) => !i.isVoid && i.isTracked);
       if (trackedLines.length > 0) {
         const movementRows = trackedLines.map((i) => ({
           id: uuidv5(`stock-sale:${i.itemId}`, PS_UUID_NS),
@@ -571,36 +581,45 @@ export function usePayWalkInOrder() {
           note: null,
           created_at: now,
         }));
-        const { error: mvErr } = await supabase
-          .from('stock_movements')
-          .upsert(movementRows, { onConflict: 'id' });
-        if (mvErr) throw mvErr;
+        await persistRow({
+          localId: uuidv5(`pay-stock:${input.orderId}`, PS_UUID_NS),
+          tenantId: input.tenantId,
+          branchId: input.branchId,
+          table: 'stock_movements',
+          op: 'upsert',
+          payload: movementRows as Record<string, unknown>[],
+          conflict: 'ignore',
+          dependsOn: [payLocalId],
+        });
       }
 
-      // 3. Audit: order.pay.
+      // 3. Enqueue: audit log (dependsOn pay).
       const auditId = uuidv5(`order-pay:${input.orderId}`, PS_UUID_NS);
-      const { error: auditErr } = await supabase
-        .from('audit_log')
-        .upsert(
-          {
-            id: auditId,
-            tenant_id: input.tenantId,
-            branch_id: input.branchId,
-            actor_id: input.managerId,
-            action: 'order.pay',
-            entity: 'order',
-            entity_id: input.orderId,
-            amount: input.total,
-            meta: {
-              payment_method: input.paymentMethod,
-              shift_id: input.shiftId,
-              business_day: businessDay,
-            },
-            created_at: now,
+      await persistRow({
+        localId: `audit-pay:${input.orderId}`,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'audit_log',
+        op: 'upsert',
+        payload: {
+          id: auditId,
+          tenant_id: input.tenantId,
+          branch_id: input.branchId,
+          actor_id: input.managerId,
+          action: 'order.pay',
+          entity: 'order',
+          entity_id: input.orderId,
+          amount: input.total,
+          meta: {
+            payment_method: input.paymentMethod,
+            shift_id: input.shiftId,
+            business_day: businessDay,
           },
-          { onConflict: 'id' },
-        );
-      if (auditErr) throw auditErr;
+          created_at: now,
+        },
+        conflict: 'ignore',
+        dependsOn: [payLocalId],
+      });
 
       return { paidAt: now };
     },

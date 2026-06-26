@@ -406,6 +406,28 @@ slot, and the persistent `OfflineBanner`. Web owner-read reuses the same regions
 - **Props:** `title`, `branchSwitcher?`, `online`, `pendingCount`, `children`, `headerEnd?` (actions slot).
 - **RTL/a11y:** header lays out start→end mirrored; identity at start, actions at end; respects top/bottom
   safe areas and reserves space for the fixed `OfflineBanner` (`fixed-element-offset`, `safe-area-awareness`).
+- **Phase 8:** the reserved "sync dot" slot is realized by `SyncStatusChip` (§9.14); the shell may also stack
+  the `SyncAttentionBanner` below the header when a write dead-letters.
+
+### 9.14 Sync-status primitives (operator — Phase 8)
+The offline-resilience surfaces. Full screen/state specs in **`docs/design/phase-8-offline-sync-status.md`**;
+this is the primitive registry only. Four operator-facing sync states — `synced` / `syncing` / `offline` /
+`attention` (precedence `attention > offline > syncing > synced`) — map onto **existing** semantic tokens
+(`status-free` / `primary` / `warning` / `danger`; **no new color hex**, feature doc §11).
+- **`SyncStatusChip`** — persistent header chip (end side, every operate tab); `StatusPill` grammar + state
+  icon + count; tappable → opens the Sync Center. Always tappable (never disabled); ≥ 52 via `hitSlop`;
+  count/time Arabic-Indic; non-directional icons not mirrored.
+- **`SyncAttentionBanner`** — the dead-letter alarm; appears **only** when `failedCount > 0`; `danger`-tinted,
+  persistent, **never flashes** (anti-panic); Review action opens the Center's Failed section.
+- **`SyncCenterSheet`** (+ `SyncSummaryHeader`, `QueueEntryRow`) — the detail view (a `Sheet`, §9.3): status
+  summary (connectivity, last-synced, counts, Sync-now), the Failed (dead-letter) list with per-row
+  Retry/Discard, and the Pending list. Discarding a money-bearing entry requires the money-aware
+  `ConfirmDialog` (§9.8). All-clear empty state answers "is everything synced?" at shift close.
+- **`PendingTag`** — tiny "بانتظار المزامنة" marker on optimistically-created flow items (device/order/stock
+  rows) until the outbox entry flushes.
+- **`OfflineBanner` (§9.9)** — extended in Phase 8 to re-wire the pending count + tap-to-open the Center.
+- **Icons:** Phase 8 introduces the first consistent vector icon set (Lucide via `lucide-react-native` /
+  `@expo/vector-icons`) — never emoji (`no-emoji-icons`); package choice is an engineering call (feature §11.2).
 
 ---
 

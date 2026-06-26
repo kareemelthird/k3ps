@@ -44,6 +44,7 @@ import {
   type SessionSegment,
 } from '@ps/core';
 
+import { persistRow } from '../../lib/outbox';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../stores/useAuth';
 
@@ -297,11 +298,19 @@ export function useSwitchPlayMode() {
         updated_at: nowIso(),
       };
 
-      // 4. Write all closed sub-segments + the new open segment as idempotent upserts.
-      const { error: segsErr } = await supabase
-        .from('session_segments')
-        .upsert([...segmentRows, newSegmentRow], { onConflict: 'id' });
-      if (segsErr) throw segsErr;
+      // 4. Enqueue all closed sub-segments + new open segment as one array upsert.
+      //    One outbox entry per logical action (switch = single array payload).
+      //    LocalId is deterministic so a re-enqueue collapses (AC 11, AC 14).
+      const switchLocalId = uuidv5(`switch:${input.sessionId}:${switchedAt}`, PS_UUID_NS);
+      await persistRow({
+        localId: switchLocalId,
+        tenantId: input.tenantId,
+        branchId: null,
+        table: 'session_segments',
+        op: 'upsert',
+        payload: [...segmentRows, newSegmentRow] as Record<string, unknown>[],
+        conflict: 'merge',
+      });
 
       return { switchedAt, newSegmentId };
     },
@@ -463,45 +472,24 @@ export function useCloseSessionPhase4() {
         discount: input.session.discount ?? 0,
       });
 
-      // Write materialized segments (open-meter only; others have no new segments).
-      if (newSegmentRows.length > 0) {
-        const { error: segsErr } = await supabase
-          .from('session_segments')
-          .upsert(newSegmentRows, { onConflict: 'id' });
-        if (segsErr) throw segsErr;
-      }
+      // Phase 8: build stock movement rows (reads stay; these feed the RPC payload).
+      // IMPORTANT: both reads must succeed — if either fails (offline / transient)
+      // we throw so the mutation retries when online. Silently continuing with
+      // data=null would enqueue p_movements:[] and permanently drop tracked-product
+      // sale stock from the ledger. (BLOCKER 3 / Phase 8 review.)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let movementRows: any[] = [];
 
-      // Update session row.
-      // Phase 5: also stamp payment_method and shift_id at close.
-      const { error: sessionErr } = await supabase
-        .from('sessions')
-        .update({
-          status: 'closed',
-          ended_at: endedAt,
-          time_total: timeTotalPiastres,
-          grand_total: grandTotal,
-          payment_method: input.paymentMethod ?? null,
-          shift_id: input.shiftId ?? null,
-          updated_at: now,
-        })
-        .eq('id', input.sessionId)
-        .eq('tenant_id', input.tenantId);
-      if (sessionErr) throw sessionErr;
-
-      // Phase 5: Write stock sale movements for session-attached tracked items
-      // (Decision 4: decrement at session close, not at add-time).
-      // Fetch all non-void orders + items for this session, then write
-      // one stock_movements row per tracked non-void line.
-      // Idempotent: movement id = uuidv5(`stock-sale:{itemId}`, PS_UUID_NS).
-      const { data: sessionOrders } = await supabase
+      const { data: sessionOrders, error: ordersReadErr } = await supabase
         .from('orders')
         .select('id, status, order_items(id, product_id, qty, is_void)')
         .eq('session_id', input.sessionId)
         .eq('tenant_id', input.tenantId)
         .neq('status', 'void');
 
+      if (ordersReadErr) throw ordersReadErr;
+
       if (sessionOrders && sessionOrders.length > 0) {
-        // Collect product ids to check if tracked.
         const productIds = new Set<string>();
         for (const order of sessionOrders) {
           for (const item of (order.order_items ?? [])) {
@@ -510,24 +498,18 @@ export function useCloseSessionPhase4() {
         }
 
         if (productIds.size > 0) {
-          // Fetch product stock flags.
-          const { data: productRows } = await supabase
+          const { data: productRows, error: productsReadErr } = await supabase
             .from('products')
             .select('id, stock')
             .in('id', Array.from(productIds))
             .eq('tenant_id', input.tenantId);
 
+          if (productsReadErr) throw productsReadErr;
+
           const productStockMap = new Map<string, number | null>();
           for (const p of (productRows ?? [])) {
             productStockMap.set(p.id, p.stock);
           }
-
-          // Build sale movement rows for tracked lines.
-          const movementRows: {
-            id: string; tenant_id: string; branch_id: string;
-            product_id: string; delta: number; reason: 'sale';
-            order_id: string; manager_id: string; note: null; created_at: string;
-          }[] = [];
 
           for (const order of sessionOrders) {
             for (const item of (order.order_items ?? [])) {
@@ -548,33 +530,38 @@ export function useCloseSessionPhase4() {
               });
             }
           }
-
-          if (movementRows.length > 0) {
-            const { error: mvErr } = await supabase
-              .from('stock_movements')
-              .upsert(movementRows, { onConflict: 'id' });
-            if (mvErr) throw mvErr;
-          }
         }
       }
 
-      // Free the device.
-      const { error: deviceErr } = await supabase
-        .from('devices')
-        .update({ status: 'free', updated_at: now })
-        .eq('id', input.deviceId)
-        .eq('tenant_id', input.tenantId);
-      if (deviceErr) throw deviceErr;
-
-      // Write audit_log (deterministic UUID → idempotent upsert; one close = one row).
-      // uuidv5 key 'close:{sessionId}' is stable: any retry produces the SAME id
-      // and the upsert updates-in-place instead of inserting a second row
-      // (BLOCKER 3 / AC 40 / CLAUDE.md §2.8).
+      // Phase 8: collapse all 5 writes into one idempotent RPC entry (ADR-0009 §Q3).
+      // close_session_tx is atomic, SECURITY INVOKER, and ON CONFLICT DO NOTHING for
+      // ledger rows → safe to replay (AC 14). LocalId deterministic so a retry maps
+      // to the same outbox row (no double-close).
       const auditId = uuidv5(`close:${input.sessionId}`, PS_UUID_NS);
-      const { error: auditErr } = await supabase
-        .from('audit_log')
-        .upsert(
-          {
+      await persistRow({
+        localId: `close:${input.sessionId}`,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'close_session_tx',
+        op: 'rpc',
+        payload: {
+          p_session_id: input.sessionId,
+          p_tenant_id: input.tenantId,
+          p_branch_id: input.branchId,
+          p_actor_id: input.managerId,
+          p_session_patch: {
+            status: 'closed',
+            ended_at: endedAt,
+            time_total: timeTotalPiastres,
+            grand_total: grandTotal,
+            payment_method: input.paymentMethod ?? null,
+            shift_id: input.shiftId ?? null,
+            updated_at: now,
+          },
+          p_segments: newSegmentRows,
+          p_movements: movementRows,
+          p_device_id: input.deviceId,
+          p_audit: {
             id: auditId,
             tenant_id: input.tenantId,
             branch_id: input.branchId,
@@ -590,9 +577,9 @@ export function useCloseSessionPhase4() {
             },
             created_at: now,
           },
-          { onConflict: 'id' },
-        );
-      if (auditErr) throw auditErr;
+        } as Record<string, unknown>,
+        conflict: 'merge',
+      });
 
       return { grandTotal, timeTotalPiastres, endedAt };
     },
@@ -625,15 +612,23 @@ export function useIncrementMatchCount() {
   return useMutation({
     mutationFn: async (input: IncrementMatchCountInput) => {
       const newCount = Math.max(0, input.currentCount + input.delta);
-      const { error } = await supabase
-        .from('sessions')
-        .update({
+      const now = nowIso();
+      // nowIso() in localId makes each tap unique; FIFO drain ensures final value correct.
+      const matchLocalId = uuidv5(`match:${input.sessionId}:${now}`, PS_UUID_NS);
+      await persistRow({
+        localId: matchLocalId,
+        tenantId: input.tenantId,
+        branchId: null,
+        table: 'sessions',
+        op: 'update',
+        payload: {
+          id: input.sessionId,
+          tenant_id: input.tenantId,
           match_count: newCount,
-          updated_at: nowIso(),
-        })
-        .eq('id', input.sessionId)
-        .eq('tenant_id', input.tenantId);
-      if (error) throw error;
+          updated_at: now,
+        },
+        conflict: 'merge',
+      });
       return { newCount };
     },
     onSettled: (_data, _err, input) => {

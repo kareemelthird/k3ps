@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { nowIso, PS_UUID_NS, uuidv4, uuidv5 } from '@ps/core';
 import type { BillingMode, Device, PlayMode, Session } from '@ps/core';
 
+import { persistRow } from '../../lib/outbox';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../stores/useAuth';
 
@@ -159,21 +160,42 @@ export function useStartSession() {
         updated_at: nowIso(),
       };
 
-      // Direct idempotent writes (Phase 3/4). Outbox deferred to Phase 8.
-      const { error: sessionErr } = await supabase
-        .from('sessions')
-        .upsert(session, { onConflict: 'id' });
-      if (sessionErr) throw sessionErr;
+      // Phase 8: enqueue via durable outbox (AC 11 — reroute all mutations).
+      // Session first (no dependsOn); segment dependsOn session so it never
+      // orphan-applies (AC 12); device update dependsOn session too.
+      const deviceLocalId = uuidv5(`device-busy:${input.deviceId}:${startedAt}`, PS_UUID_NS);
 
-      await supabase
-        .from('session_segments')
-        .upsert(segment, { onConflict: 'id' });
+      await persistRow({
+        localId: sessionId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'sessions',
+        op: 'upsert',
+        payload: session as Record<string, unknown>,
+        conflict: 'merge',
+      });
 
-      await supabase
-        .from('devices')
-        .update({ status: 'busy', updated_at: nowIso() })
-        .eq('id', input.deviceId)
-        .eq('tenant_id', input.tenantId);
+      await persistRow({
+        localId: segmentId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'session_segments',
+        op: 'upsert',
+        payload: segment as Record<string, unknown>,
+        conflict: 'merge',
+        dependsOn: [sessionId],
+      });
+
+      await persistRow({
+        localId: deviceLocalId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'devices',
+        op: 'update',
+        payload: { id: input.deviceId, status: 'busy', updated_at: nowIso(), tenant_id: input.tenantId },
+        conflict: 'merge',
+        dependsOn: [sessionId],
+      });
 
       return { sessionId, segmentId };
     },

@@ -18,6 +18,7 @@ import {
   localHour,
   businessDayKey,
   DEFAULT_CUTOVER_HOUR,
+  formatRelativeTime,
 } from '../time/time';
 
 // ─── Known UTC → Cairo mapping used across tests ──────────────────────────────
@@ -401,5 +402,41 @@ describe('businessDayKey — DST wall-clock parity (regression for the spring-fo
     // spring-forward business day itself, never the day before.
     expect(businessDayKey('2026-04-24T03:00:00.000Z')).toBe('2026-04-24');
     expect(businessDayKey('2026-04-24T03:59:00.000Z')).toBe('2026-04-24');
+  });
+});
+
+describe('formatRelativeTime — bucketed, i18n-friendly last-synced token', () => {
+  const now = '2026-06-26T12:00:00.000Z';
+
+  it('returns a structured token (unit + value), never a formatted string', () => {
+    expect(formatRelativeTime(now, '2026-06-26T11:30:00.000Z')).toEqual({ unit: 'minutes', value: 30 });
+  });
+
+  it('< 10s → now', () => {
+    expect(formatRelativeTime(now, '2026-06-26T11:59:55.000Z')).toEqual({ unit: 'now', value: 0 });
+    expect(formatRelativeTime(now, now)).toEqual({ unit: 'now', value: 0 });
+  });
+
+  it('10s..<60s → seconds', () => {
+    expect(formatRelativeTime(now, '2026-06-26T11:59:45.000Z')).toEqual({ unit: 'seconds', value: 15 });
+  });
+
+  it('<60m → minutes (rounded)', () => {
+    expect(formatRelativeTime(now, '2026-06-26T11:58:40.000Z')).toEqual({ unit: 'minutes', value: 1 }); // 80s → 1m
+    expect(formatRelativeTime(now, '2026-06-26T11:01:00.000Z')).toEqual({ unit: 'minutes', value: 59 });
+  });
+
+  it('<24h → hours (rounded)', () => {
+    expect(formatRelativeTime(now, '2026-06-26T11:00:00.000Z')).toEqual({ unit: 'hours', value: 1 });
+    expect(formatRelativeTime(now, '2026-06-25T13:00:00.000Z')).toEqual({ unit: 'hours', value: 23 });
+  });
+
+  it('>=24h → days (rounded)', () => {
+    expect(formatRelativeTime(now, '2026-06-25T12:00:00.000Z')).toEqual({ unit: 'days', value: 1 });
+    expect(formatRelativeTime(now, '2026-06-23T12:00:00.000Z')).toEqual({ unit: 'days', value: 3 });
+  });
+
+  it('clamps a future instant to now (never negative)', () => {
+    expect(formatRelativeTime(now, '2026-06-26T12:05:00.000Z')).toEqual({ unit: 'now', value: 0 });
   });
 });

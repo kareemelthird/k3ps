@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../src/stores/useAuth';
 import { colors, fontSize } from '../../src/design/tokens';
 import { AppText } from '../../src/components/AppText';
+import { useRealtime } from '../../src/lib/realtime';
 
 function TabLabel({ label, focused }: { label: string; focused: boolean }) {
   return (
@@ -21,8 +22,17 @@ function TabLabel({ label, focused }: { label: string; focused: boolean }) {
 }
 
 export default function OperateLayout() {
-  const { session } = useAuth();
+  const { session, claim, activeBranchId } = useAuth();
   const { t } = useTranslation();
+
+  // Subscribe to tenant-scoped realtime postgres_changes (ADR-0009 §Q5).
+  // Invalidates TanStack Query caches on any row change for this tenant/branch.
+  // setAuth(accessToken) called on mount and on every token refresh to keep RLS active.
+  useRealtime(
+    claim?.tenant_id ?? null,
+    activeBranchId ?? null,
+    session?.access_token ?? null,
+  );
 
   if (!session) {
     return <Redirect href="/(auth)/login" />;

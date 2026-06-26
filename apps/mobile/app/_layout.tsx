@@ -17,6 +17,7 @@ import { supabase } from '../src/lib/supabase';
 import { queryClient } from '../src/lib/queryClient';
 import { useAuth } from '../src/stores/useAuth';
 import { useNetworkWatcher } from '../src/hooks/useNetworkWatcher';
+import { initOutbox } from '../src/lib/outbox';
 import { colors } from '../src/design/tokens';
 
 // Force RTL at the earliest possible moment (CLAUDE.md §6, mobile-patterns.md)
@@ -32,6 +33,10 @@ function RootLayoutInner() {
   useNetworkWatcher();
 
   useEffect(() => {
+    // Boot the outbox (rehydrate from SQLite, sync Zustand counts).
+    // Must run before any mutation can be enqueued (AC 7).
+    void initOutbox();
+
     // Restore persisted branch selection
     void restoreActiveBranch();
 

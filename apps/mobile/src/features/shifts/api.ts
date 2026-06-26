@@ -31,6 +31,7 @@ import {
 } from '@ps/core';
 
 import { supabase } from '../../lib/supabase';
+import { persistRow } from '../../lib/outbox';
 import { useAuth } from '../../stores/useAuth';
 import { sessionKeys } from '../session/api';
 import { orderKeys } from '../orders/api';
@@ -116,50 +117,55 @@ export function useOpenShift_mutation() {
       const shiftId = uuidv4();
       const businessDay = businessDayKey(now, input.cutoverHour ?? 6);
 
-      // Insert the shift row (upsert so a retry with same id is safe).
-      const { error: shiftErr } = await supabase
-        .from('shifts')
-        .upsert(
-          {
-            id: shiftId,
-            tenant_id: input.tenantId,
-            branch_id: input.branchId,
-            manager_id: input.managerId,
-            opened_at: now,
-            closed_at: null,
-            opening_cash: input.openingCash,
-            expected_cash: null,
-            actual_cash: null,
-            difference: null,
-            notes: null,
-            status: 'open',
-            created_at: now,
-            updated_at: now,
-          },
-          { onConflict: 'id' },
-        );
-      if (shiftErr) throw shiftErr;
+      // Enqueue shift upsert.
+      await persistRow({
+        localId: shiftId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'shifts',
+        op: 'upsert',
+        payload: {
+          id: shiftId,
+          tenant_id: input.tenantId,
+          branch_id: input.branchId,
+          manager_id: input.managerId,
+          opened_at: now,
+          closed_at: null,
+          opening_cash: input.openingCash,
+          expected_cash: null,
+          actual_cash: null,
+          difference: null,
+          notes: null,
+          status: 'open',
+          created_at: now,
+          updated_at: now,
+        },
+        conflict: 'merge',
+      });
 
-      // Audit: shift.open.
+      // Enqueue audit (dependsOn shift — never orphan-applies).
       const auditId = uuidv5(`shift-open:${shiftId}`, PS_UUID_NS);
-      const { error: auditErr } = await supabase
-        .from('audit_log')
-        .upsert(
-          {
-            id: auditId,
-            tenant_id: input.tenantId,
-            branch_id: input.branchId,
-            actor_id: input.managerId,
-            action: 'shift.open',
-            entity: 'shift',
-            entity_id: shiftId,
-            amount: input.openingCash,
-            meta: { branch_id: input.branchId, business_day: businessDay },
-            created_at: now,
-          },
-          { onConflict: 'id' },
-        );
-      if (auditErr) throw auditErr;
+      await persistRow({
+        localId: auditId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'audit_log',
+        op: 'upsert',
+        payload: {
+          id: auditId,
+          tenant_id: input.tenantId,
+          branch_id: input.branchId,
+          actor_id: input.managerId,
+          action: 'shift.open',
+          entity: 'shift',
+          entity_id: shiftId,
+          amount: input.openingCash,
+          meta: { branch_id: input.branchId, business_day: businessDay },
+          created_at: now,
+        },
+        conflict: 'ignore',
+        dependsOn: [shiftId],
+      });
 
       return { shiftId };
     },
@@ -247,10 +253,17 @@ export function useCloseShift() {
         counted_cash: input.countedCash,
       });
 
-      // 5. Persist the closed shift row (idempotent upsert).
-      const { error: closeErr } = await supabase
-        .from('shifts')
-        .update({
+      // Phase 8: enqueue the shift update and audit through the outbox.
+      const closeLocalId = uuidv5(`shift-close-update:${input.shiftId}`, PS_UUID_NS);
+      await persistRow({
+        localId: closeLocalId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'shifts',
+        op: 'update',
+        payload: {
+          id: input.shiftId,
+          tenant_id: input.tenantId,
           status: 'closed',
           closed_at: now,
           expected_cash,
@@ -258,36 +271,37 @@ export function useCloseShift() {
           difference,
           notes: input.notes ?? null,
           updated_at: now,
-        })
-        .eq('id', input.shiftId)
-        .eq('tenant_id', input.tenantId);
-      if (closeErr) throw closeErr;
+        },
+        conflict: 'merge',
+      });
 
-      // 6. Audit: shift.close (amount = difference; may be negative — NOT clamped).
       const auditId = uuidv5(`shift-close:${input.shiftId}`, PS_UUID_NS);
-      const { error: auditErr } = await supabase
-        .from('audit_log')
-        .upsert(
-          {
-            id: auditId,
-            tenant_id: input.tenantId,
-            branch_id: input.branchId,
-            actor_id: input.managerId,
-            action: 'shift.close',
-            entity: 'shift',
-            entity_id: input.shiftId,
-            amount: difference,
-            meta: {
-              opening_cash: input.openingCash,
-              expected_cash,
-              actual_cash: input.countedCash,
-              business_day: businessDay,
-            },
-            created_at: now,
+      await persistRow({
+        localId: auditId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'audit_log',
+        op: 'upsert',
+        payload: {
+          id: auditId,
+          tenant_id: input.tenantId,
+          branch_id: input.branchId,
+          actor_id: input.managerId,
+          action: 'shift.close',
+          entity: 'shift',
+          entity_id: input.shiftId,
+          amount: difference,
+          meta: {
+            opening_cash: input.openingCash,
+            expected_cash,
+            actual_cash: input.countedCash,
+            business_day: businessDay,
           },
-          { onConflict: 'id' },
-        );
-      if (auditErr) throw auditErr;
+          created_at: now,
+        },
+        conflict: 'ignore',
+        dependsOn: [closeLocalId],
+      });
 
       return { expected_cash, difference, closedAt: now };
     },
