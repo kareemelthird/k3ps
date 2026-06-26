@@ -77,14 +77,22 @@ select plan(21);
 -- FIXTURE SETUP (as superuser — RLS and trigger caps do not apply)
 -- =============================================================================
 
--- Attach Stripe customer IDs to the backfill subscriptions for webhook tests.
-update public.subscriptions
-  set stripe_customer_id = 'cus_test_aaaa'
-where tenant_id = 'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa';
+-- Subscription fixtures for tenants A and B with Stripe customer IDs (webhook
+-- tests). NOTE: the migration 0010 backfill grandfathers EXISTING tenants, but
+-- in CI migrations run BEFORE seed.sql creates tenants A/B, so the backfill
+-- inserts nothing. The test therefore creates these rows itself (insert, not
+-- update). on-conflict keeps it idempotent if a backfill row ever exists.
+insert into public.subscriptions (tenant_id, plan, status, comped, stripe_customer_id)
+values ('aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa', 'pro', 'active', true, 'cus_test_aaaa')
+on conflict (tenant_id) do update
+  set stripe_customer_id = excluded.stripe_customer_id,
+      plan = excluded.plan, status = excluded.status, comped = excluded.comped;
 
-update public.subscriptions
-  set stripe_customer_id = 'cus_test_bbbb'
-where tenant_id = 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb';
+insert into public.subscriptions (tenant_id, plan, status, comped, stripe_customer_id)
+values ('bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb', 'pro', 'active', true, 'cus_test_bbbb')
+on conflict (tenant_id) do update
+  set stripe_customer_id = excluded.stripe_customer_id,
+      plan = excluded.plan, status = excluded.status, comped = excluded.comped;
 
 -- =============================================================================
 -- BLOCK B: Subscription RLS isolation (tests 1-4)
@@ -536,6 +544,12 @@ select set_config('request.jwt.claims', '', true);
 -- Trial plan: max_branches=1. Active count=2, already over limit.
 -- Insert C-4 as inactive (superuser; cap skipped — jwt.claims='') for test 21.
 -- =============================================================================
+
+-- Block G test 15 comped tenant-C to 'pro' (higher caps). Reset to 'trial'
+-- (max_branches=1) as superuser so the reactivation cap test below is meaningful.
+update public.subscriptions
+   set plan = 'trial', comped = false
+ where tenant_id = 'cccccccc-0000-4000-8000-cccccccccccc';
 
 insert into public.branches (id, tenant_id, name, is_active)
 values ('cccc0004-0000-4000-8000-cccccccccccc',
