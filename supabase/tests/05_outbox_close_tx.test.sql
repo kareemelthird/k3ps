@@ -52,7 +52,7 @@
 -- =============================================================================
 
 begin;
-select plan(17);
+select plan(18);
 
 -- ---------------------------------------------------------------------------
 -- FIXTURE SETUP (as superuser — before switching to the authenticated role)
@@ -128,19 +128,20 @@ select diag('PROBE staff=' || coalesce((select public.is_tenant_staff())::text,'
   || ' tenant=' || coalesce((select public.current_tenant_id())::text,'NULL')
   || ' uid=' || coalesce((select auth.uid())::text,'NULL'));
 select ok((select public.is_tenant_staff()), 'PROBE: manager_a is_tenant_staff() = true');
--- Dump the LIVE audit_log policies (reveals restrictive/role/with_check surprises)
-select diag('AUDITPOL name=' || policyname || ' cmd=' || cmd
-  || ' permissive=' || permissive
-  || ' roles=' || array_to_string(roles, ',')
-  || ' check=' || coalesce(with_check, 'NULL'))
-from pg_policies where schemaname = 'public' and tablename = 'audit_log';
-select diag('AUDIT forcerls=' || (select relforcerowsecurity::text from pg_class where oid = 'public.audit_log'::regclass)
-  || ' has_insert_grant=' || has_table_privilege('authenticated', 'public.audit_log', 'INSERT')::text);
--- Dump every trigger on audit_log + the stamp_impersonator source (LIVE)
-select diag('AUDITTRG ' || tgname || ' enabled=' || tgenabled || ' fn=' || tgfoid::regproc::text)
-from pg_trigger where tgrelid = 'public.audit_log'::regclass and not tgisinternal;
-select diag('STAMPFN ' || replace(pg_get_functiondef('public.stamp_impersonator()'::regprocedure), chr(10), ' | '));
-select diag('ACTIVEMBR ' || replace(pg_get_functiondef('public.is_active_member()'::regprocedure), chr(10), ' | '));
+-- DECISIVE: drop the stamp_impersonator BEFORE INSERT trigger (as superuser),
+-- then retry the manager audit insert. If it now succeeds, the trigger is the cause.
+reset role;
+drop trigger if exists audit_log_stamp_impersonator on public.audit_log;
+set local role authenticated;
+select lives_ok(
+  $$ insert into public.audit_log
+       (id, tenant_id, branch_id, actor_id, action, entity, entity_id, amount, meta, created_at)
+     values ('aaaaaaaa-d1a9-4000-8000-000000000098',
+             'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+             'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
+             '00000000-0000-4000-8000-000000000002',
+             'probe.notrg', 'sessions', null, null, '{}'::jsonb, now()) $$,
+  'PROBE: manager audit insert succeeds WITHOUT stamp_impersonator trigger');
 select lives_ok(
   $$ insert into public.audit_log
        (id, tenant_id, branch_id, actor_id, action, entity, entity_id, amount, meta, created_at)
