@@ -52,7 +52,7 @@
 -- =============================================================================
 
 begin;
-select plan(18);
+select plan(19);
 
 -- ---------------------------------------------------------------------------
 -- FIXTURE SETUP (as superuser — before switching to the authenticated role)
@@ -128,20 +128,27 @@ select diag('PROBE staff=' || coalesce((select public.is_tenant_staff())::text,'
   || ' tenant=' || coalesce((select public.current_tenant_id())::text,'NULL')
   || ' uid=' || coalesce((select auth.uid())::text,'NULL'));
 select ok((select public.is_tenant_staff()), 'PROBE: manager_a is_tenant_staff() = true');
--- DECISIVE: drop the stamp_impersonator BEFORE INSERT trigger (as superuser),
--- then retry the manager audit insert. If it now succeeds, the trigger is the cause.
+-- ISOLATE the failing WITH CHECK conjunct: recreate the policy with each alone.
+-- (a) tenant_id-only:
 reset role;
-drop trigger if exists audit_log_stamp_impersonator on public.audit_log;
+drop policy if exists audit_log_staff_insert on public.audit_log;
+create policy audit_log_staff_insert on public.audit_log for insert
+  with check (tenant_id = (select public.current_tenant_id()));
 set local role authenticated;
 select lives_ok(
-  $$ insert into public.audit_log
-       (id, tenant_id, branch_id, actor_id, action, entity, entity_id, amount, meta, created_at)
-     values ('aaaaaaaa-d1a9-4000-8000-000000000098',
-             'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
-             'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
-             '00000000-0000-4000-8000-000000000002',
-             'probe.notrg', 'sessions', null, null, '{}'::jsonb, now()) $$,
-  'PROBE: manager audit insert succeeds WITHOUT stamp_impersonator trigger');
+  $$ insert into public.audit_log (id, tenant_id, branch_id, actor_id, action, entity, entity_id, amount, meta, created_at)
+     values ('aaaaaaaa-d1a9-4000-8000-000000000097','aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa','aaaa0001-0000-4000-8000-aaaaaaaaaaaa','00000000-0000-4000-8000-000000000002','probe.tenantonly','sessions',null,null,'{}'::jsonb,now()) $$,
+  'PROBE: manager insert with check = tenant_id only');
+-- (b) is_tenant_staff()-only:
+reset role;
+drop policy if exists audit_log_staff_insert on public.audit_log;
+create policy audit_log_staff_insert on public.audit_log for insert
+  with check ((select public.is_tenant_staff()));
+set local role authenticated;
+select lives_ok(
+  $$ insert into public.audit_log (id, tenant_id, branch_id, actor_id, action, entity, entity_id, amount, meta, created_at)
+     values ('aaaaaaaa-d1a9-4000-8000-000000000096','aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa','aaaa0001-0000-4000-8000-aaaaaaaaaaaa','00000000-0000-4000-8000-000000000002','probe.staffonly','sessions',null,null,'{}'::jsonb,now()) $$,
+  'PROBE: manager insert with check = is_tenant_staff() only');
 select lives_ok(
   $$ insert into public.audit_log
        (id, tenant_id, branch_id, actor_id, action, entity, entity_id, amount, meta, created_at)
