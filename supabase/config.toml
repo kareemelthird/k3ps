@@ -22,3 +22,9 @@ enabled = true
 site_url = "http://localhost:3000"
 jwt_expiry = 3600
 enable_signup = true
+
+# stripe-webhook must run without JWT verification: Stripe is not a Supabase-authenticated
+# caller. Its identity is proved by HMAC signature on the raw body inside the handler.
+# See supabase/functions/stripe-webhook/index.ts and ADR-0010 Q2.
+[functions.stripe-webhook]
+verify_jwt = false

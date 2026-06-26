@@ -31,6 +31,7 @@ module.exports = {
     'src/id/id.ts',
     'src/reports/report-helpers.ts',
     'src/outbox/outbox.ts',
+    'src/entitlements/entitlements.ts',
     '!src/**/*.test.ts',
     '!src/**/__tests__/**',
   ],

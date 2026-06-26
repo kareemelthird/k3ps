@@ -146,6 +146,43 @@ banner is a **safety control**, not calm chrome. Everywhere else the system uses
 countdown, four redundant signals). `impersonation` violet remains a **one-purpose color** (§2.2): it paints
 this banner/frame and nothing else.
 
+### 2.5 Billing & entitlement status mapping (Phase 9 — SaaS billing)
+
+The owner billing surface (`/dashboard/billing`) and the super-admin subscriptions view introduce a new
+*platform→tenant subscription* status axis. Following the Phase-8 precedent (sync states map onto existing
+tokens — **no new color hex**), the four subscription statuses + the paywall states reuse the alert/status
+palette already defined in §2.2. The mapping is **binding** so a status always *means* the same colour it
+does elsewhere (`color-semantic`, `consistency`); status is **never colour-only** — every state carries a
+`StatusPill` (dot/icon + label) per §9.2.
+
+| Subscription / paywall state | Token | Pill grammar |
+|---|---|---|
+| `trialing` (within trial) | `info` blue | clock icon + "تجريبي — {n} يوم متبقٍ" |
+| `active` | `status-free` green | check icon + "نشِط" |
+| `past_due` (within grace) | `warning` amber | alert icon + "دفعة متعثّرة" |
+| `past_due` (grace elapsed) / read-only | `danger` red | lock icon + "وضع القراءة فقط" |
+| `canceled` | `danger` red (muted) | x-circle icon + "مُلغى" |
+| `comped` (super-admin grant) | `platform` steel | gift icon + "خطة ممنوحة" — the **one** non-`/admin` reuse of the `platform` hue, justified because a comp *is* a platform act; identity-only, never an action |
+| `incomplete` (Checkout not finalized) | `text-muted` neutral | spinner/hourglass + "قيد الإتمام" |
+
+**Usage-meter colour convention (binding).** The plan-limit meters (branches / devices / staff used of
+allowed) reuse the chart/track + alert tokens — **no new hex**:
+
+- track = `chart-track` (`surface-2`); fill = `primary` teal under 80% of the cap;
+- fill recolours to `warning` amber at **≥ 80%** (near limit) and `danger` red at **= 100%** (cap hit);
+- the meter is **never colour-only**: it always shows the literal "{used} / {limit}" count (tabular,
+  Arabic-Indic) and, at the cap, a lock icon + "بلغت الحد" label.
+
+**Platform-subscription currency (the second money axis — CLAUDE.md §2.1 caveat, spec §7 Q5).** The café's
+operational money stays **EGP integer piastres** via `formatEgp` (§6) and is unchanged. The subscription
+charge is a **separate** amount in the platform's billing currency (minor units; the currency itself is
+ADR-0010 Q5 / a human call). Because `formatEgp` is EGP-pinned, the billing UI must **not** reuse it for the
+subscription price; it needs a generalized `@ps/core` formatter — **design contract:**
+`formatMoneyMinor(minorUnits, currencyCode, { arabicDigits })` → grouped amount + the currency's
+Arabic-localized symbol, Arabic-Indic digits, tabular. (Engineer/core call; if the ratified currency is EGP,
+this can wrap the existing `CURRENCY` constants.) Every displayed subscription amount routes through it; the
+currency is always shown explicitly beside the amount so it is never mistaken for in-app EGP.
+
 ---
 
 ## 3. Typography

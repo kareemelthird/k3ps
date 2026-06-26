@@ -41,6 +41,8 @@ export function TopBarSimple({
     // Reports: owner-only nav item (AC 12 / design §2).
     // The nav item is hidden for non-owners (empty-nav-state pattern).
     ...(isOwner ? [{ href: '/dashboard/reports', label: t('nav.reports') }] : []),
+    // Billing: owner-only nav item (Phase 9, AC 28 — always reachable for owners).
+    ...(isOwner ? [{ href: '/dashboard/billing', label: t('nav.billing') }] : []),
   ];
 
   return (

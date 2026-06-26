@@ -16,7 +16,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useAuth } from '@/lib/auth/AuthContext';
 
-export type AdminNav = 'overview' | 'audit';
+export type AdminNav = 'overview' | 'subscriptions' | 'audit';
 
 interface AdminSidebarProps {
   active: AdminNav;
@@ -30,6 +30,7 @@ export function AdminSidebar({ active, onSignOut }: AdminSidebarProps) {
 
   const navItems = [
     { id: 'overview' as const, href: '/admin', label: tAdmin('nav.tenants') },
+    { id: 'subscriptions' as const, href: '/admin/subscriptions', label: tAdmin('nav.subscriptions') },
     { id: 'audit' as const, href: '/admin/audit', label: tAdmin('nav.audit') },
   ];
 
@@ -102,6 +103,21 @@ export function AdminSidebar({ active, onSignOut }: AdminSidebarProps) {
                     strokeLinejoin="round"
                     d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
                   />
+                </svg>
+              )}
+              {/* Subscriptions icon — credit-card */}
+              {id === 'subscriptions' && (
+                <svg
+                  aria-hidden="true"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+                  <line x1="1" y1="10" x2="23" y2="10" />
                 </svg>
               )}
               {/* Audit icon */}

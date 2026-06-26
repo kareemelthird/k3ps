@@ -31,4 +31,5 @@ export * from './orders';
 export * from './shifts';
 export * from './reports';
 export * from './outbox';
+export * from './entitlements';
 export * from './types';

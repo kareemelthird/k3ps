@@ -16,7 +16,9 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { TopBarSimple } from './TopBarSimple';
-import type { Branch } from '@ps/core';
+import { ReadOnlyModeBanner } from '@/components/billing/ReadOnlyModeBanner';
+import type { Branch, SubscriptionSnapshot } from '@ps/core';
+import { resolveEntitlement, DEFAULT_GRACE_DAYS } from '@ps/core';
 import { getBrowserClient } from '@/lib/supabase/client';
 
 interface DashboardPageShellProps {
@@ -29,6 +31,7 @@ export function DashboardPageShell({ children }: DashboardPageShellProps) {
   const router = useRouter();
   const [branches, setBranches] = useState<Branch[]>([]);
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
+  const [subSnapshot, setSubSnapshot] = useState<SubscriptionSnapshot | null | undefined>(undefined);
 
   useEffect(() => {
     if (!authLoading && !claim) {
@@ -53,9 +56,45 @@ export function DashboardPageShell({ children }: DashboardPageShellProps) {
     }
   }, [claim]);
 
+  const fetchSubscription = useCallback(async () => {
+    if (!claim?.tenant_id) return;
+    try {
+      const supabase = getBrowserClient();
+      const { data } = await supabase
+        .from('subscriptions')
+        .select('status, plan, comped, trial_end, current_period_end, cancel_at_period_end')
+        .eq('tenant_id', claim.tenant_id)
+        .single();
+      if (data) {
+        const row = data as {
+          status: SubscriptionSnapshot['status'];
+          plan: SubscriptionSnapshot['planKey'];
+          comped: boolean;
+          trial_end: string | null;
+          current_period_end: string | null;
+          cancel_at_period_end: boolean;
+        };
+        setSubSnapshot({
+          status: row.status,
+          planKey: row.plan,
+          comped: row.comped,
+          trialEnd: row.trial_end,
+          currentPeriodEnd: row.current_period_end,
+          cancelAtPeriodEnd: row.cancel_at_period_end,
+        });
+      } else {
+        setSubSnapshot(null);
+      }
+    } catch {
+      // Non-blocking — missing sub → null (trialing fallback)
+      setSubSnapshot(null);
+    }
+  }, [claim?.tenant_id]);
+
   useEffect(() => {
     void fetchBranches();
-  }, [fetchBranches]);
+    void fetchSubscription();
+  }, [fetchBranches, fetchSubscription]);
 
   if (authLoading) {
     return (
@@ -67,6 +106,21 @@ export function DashboardPageShell({ children }: DashboardPageShellProps) {
 
   if (!claim) return null;
 
+  // Resolve entitlement for banner — null plan def is safe (uses trial defaults)
+  const nowIso = new Date().toISOString();
+  const entitlement = subSnapshot !== undefined
+    ? resolveEntitlement(subSnapshot, null, { graceDays: DEFAULT_GRACE_DAYS }, nowIso)
+    : null;
+
+  // Determine banner mode (undefined = still loading sub)
+  const bannerMode: 'grace' | 'readOnly' | null =
+    entitlement === null ? null
+    : entitlement.isReadOnly ? 'readOnly'
+    : (entitlement.status === 'past_due' && entitlement.graceUntil) ? 'grace'
+    : null;
+
+  const isOwner = claim.roles === 'owner' || (claim.is_super_admin ?? false);
+
   return (
     <div className="min-h-dvh bg-bg text-text">
       <TopBarSimple
@@ -75,6 +129,14 @@ export function DashboardPageShell({ children }: DashboardPageShellProps) {
         activeBranchId={activeBranchId}
         onBranchSelect={(id) => setActiveBranchId(id)}
       />
+      {/* ReadOnly/Grace banner — appears between TopBar and content; always links to billing (AC 28) */}
+      {bannerMode && (
+        <ReadOnlyModeBanner
+          mode={bannerMode}
+          graceUntilIso={entitlement?.graceUntil}
+          isOwner={isOwner}
+        />
+      )}
       <main
         id="main-content"
         tabIndex={-1}

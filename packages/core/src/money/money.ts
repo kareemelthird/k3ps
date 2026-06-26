@@ -105,15 +105,98 @@ export function formatEgpPlain(piastres: Piastres): string {
 
 /** Group a non-negative integer into thousands using the Arabic separator. */
 function groupThousands(n: number): string {
-  // Locale-free grouping so output is deterministic regardless of host locale.
-  const s = n.toString();
+  return groupThousandsWith(n.toString(), CURRENCY.groupSeparator);
+}
+
+/**
+ * Group a non-negative integer digit-string into thousands with an explicit
+ * separator. Locale-free so output is deterministic regardless of host locale.
+ */
+function groupThousandsWith(digits: string, separator: string): string {
   let out = '';
-  for (let i = 0; i < s.length; i++) {
-    const fromEnd = s.length - i;
-    if (i > 0 && fromEnd % 3 === 0) out += CURRENCY.groupSeparator;
-    out += s[i];
+  for (let i = 0; i < digits.length; i++) {
+    const fromEnd = digits.length - i;
+    if (i > 0 && fromEnd % 3 === 0) out += separator;
+    out += digits[i];
   }
   return out;
+}
+
+/**
+ * Minor-unit exponent per ISO-4217 currency (digits after the decimal point).
+ * The common cases; anything unmapped uses {@link DEFAULT_MINOR_DIGITS} (2).
+ */
+const CURRENCY_MINOR_DIGITS: Readonly<Record<string, number>> = {
+  egp: 2,
+  usd: 2,
+  eur: 2,
+  gbp: 2,
+  sar: 2,
+  aed: 2,
+  jpy: 0,
+  krw: 0,
+  bhd: 3,
+  kwd: 3,
+  omr: 3,
+  tnd: 3,
+};
+
+/** Fraction digits for a currency not listed in {@link CURRENCY_MINOR_DIGITS}. */
+export const DEFAULT_MINOR_DIGITS = 2;
+
+/** Options for {@link formatMoneyMinor}. */
+export interface FormatMoneyMinorOptions {
+  /** Render Arabic-Indic digits + Arabic grouping separator (default Western). */
+  arabicDigits?: boolean;
+}
+
+/**
+ * Format an integer amount of MINOR units in an arbitrary currency for display.
+ *
+ * This is the SEPARATE **platform-currency axis** (ADR-0010 §Q5): the SaaS
+ * subscription charge a tenant pays the platform. It is intentionally distinct
+ * from {@link formatEgp}, which stays pinned to the café's operational EGP
+ * piastres and must not change. Both are integer minor units — never floats.
+ *
+ * Behaviour:
+ *   - Fraction digits come from the currency (`USD`→2, `JPY`→0, `KWD`→3),
+ *     defaulting to {@link DEFAULT_MINOR_DIGITS} for unknown codes.
+ *   - The currency code is appended uppercased: `"1,234.50 USD"`.
+ *   - `arabicDigits: true` → Arabic-Indic digits + `٬` grouping: `"١٬٢٣٤.٥٠ EGP"`.
+ *   - Negatives carry a leading `-`. Zero formats as `"0.00 USD"` (or `"0 JPY"`).
+ *
+ * Pure and exact: integer arithmetic only, no float drift.
+ *
+ * @param minorUnits   integer amount in the currency's smallest unit
+ * @param currencyCode ISO-4217-ish code (e.g. `'usd'`, `'EGP'`, `'JPY'`)
+ * @param opts         display options ({@link FormatMoneyMinorOptions})
+ */
+export function formatMoneyMinor(
+  minorUnits: number,
+  currencyCode: string,
+  opts: FormatMoneyMinorOptions = {},
+): string {
+  const code = (currencyCode ?? '').trim();
+  const digits = CURRENCY_MINOR_DIGITS[code.toLowerCase()] ?? DEFAULT_MINOR_DIGITS;
+  const arabic = opts.arabicDigits === true;
+  const groupSep = arabic ? CURRENCY.groupSeparator : ',';
+
+  const value = Math.round(minorUnits);
+  const sign = value < 0 ? '-' : '';
+  const abs = Math.abs(value);
+
+  const divisor = 10 ** digits;
+  const major = Math.floor(abs / divisor);
+  const minor = abs % divisor;
+
+  let body = groupThousandsWith(major.toString(), groupSep);
+  if (digits > 0) {
+    body += CURRENCY.decimalSeparator + minor.toString().padStart(digits, '0');
+  }
+  if (arabic) body = toArabicDigits(body);
+
+  const codeOut = code.toUpperCase();
+  return codeOut ? `${sign}${body} ${codeOut}` : `${sign}${body}`;
 }
 
 /**

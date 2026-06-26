@@ -9,11 +9,14 @@
  */
 export {
   type Piastres,
+  type FormatMoneyMinorOptions,
   CURRENCY,
+  DEFAULT_MINOR_DIGITS,
   toArabicDigits,
   egpToPiastres,
   piastresToEgp,
   formatEgp,
   formatEgpPlain,
+  formatMoneyMinor,
   sumPiastres,
 } from './money';
