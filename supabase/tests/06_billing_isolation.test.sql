@@ -497,25 +497,29 @@ set local role authenticated;
 
 -- Test 18: UPDATE on another tenant's subscription → 0 rows affected.
 -- No UPDATE policy: no rows match the implicit USING=false; UPDATE is silently denied.
+-- Data-modifying CTE must be at the statement top level (not nested in a scalar
+-- subquery), so the WITH leads the statement and is() reads the result set.
+with upd as (
+  update public.subscriptions
+     set plan = 'basic'
+   where tenant_id = 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb'
+   returning tenant_id
+)
 select is(
-  (with upd as (
-    update public.subscriptions
-       set plan = 'basic'
-     where tenant_id = 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb'
-     returning tenant_id
-  ) select count(*)::bigint from upd),
+  (select count(*)::bigint from upd),
   0::bigint,
   'AC-deny-update: cross-tenant UPDATE on subscriptions affects 0 rows (no UPDATE policy)'
 );
 
 -- Test 19: DELETE on another tenant's subscription → 0 rows affected.
 -- No DELETE policy: same reasoning.
+with del as (
+  delete from public.subscriptions
+   where tenant_id = 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb'
+   returning tenant_id
+)
 select is(
-  (with del as (
-    delete from public.subscriptions
-     where tenant_id = 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb'
-     returning tenant_id
-  ) select count(*)::bigint from del),
+  (select count(*)::bigint from del),
   0::bigint,
   'AC-deny-delete: cross-tenant DELETE on subscriptions affects 0 rows (no DELETE policy)'
 );
