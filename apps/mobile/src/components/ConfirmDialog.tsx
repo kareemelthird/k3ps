@@ -2,6 +2,9 @@
  * ConfirmDialog — design system §9.8.
  * Required before destructive actions. Cancel (start/ghost) + Confirm (end).
  * Destructive confirm uses danger color; always shows consequence sentence.
+ *
+ * A11y (ADR-0011 §Q5): accessibilityViewIsModal traps focus; cancelLabel resolved
+ * from i18n by the caller (no hardcoded Arabic defaults here). (AC 22–23)
  */
 import React from 'react';
 import {
@@ -10,6 +13,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 
 import { colors, radius, spacing } from '../design/tokens';
 import { AppText } from './AppText';
@@ -20,6 +24,7 @@ interface Props {
   title: string;
   body: string;
   confirmLabel: string;
+  /** Defaults to t('action.cancel') when omitted. */
   cancelLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
@@ -32,22 +37,35 @@ export function ConfirmDialog({
   title,
   body,
   confirmLabel,
-  cancelLabel = 'إلغاء',
+  cancelLabel,
   onConfirm,
   onCancel,
   loading = false,
   destructive = false,
 }: Props) {
+  const { t } = useTranslation();
+  const resolvedCancelLabel = cancelLabel ?? t('action.cancel');
+
   return (
     <Modal
       visible={visible}
       transparent
       animationType="fade"
       onRequestClose={onCancel}
+      accessibilityViewIsModal
     >
-      <Pressable style={styles.scrim} onPress={onCancel} />
+      <Pressable
+        style={styles.scrim}
+        onPress={onCancel}
+        accessibilityLabel={resolvedCancelLabel}
+        accessibilityRole="button"
+      />
       <View style={styles.dialogWrapper} pointerEvents="box-none">
-        <View style={styles.dialog}>
+        <View
+          style={styles.dialog}
+          accessible
+          accessibilityRole="alert"
+        >
           <AppText role="h2" style={styles.title}>
             {title}
           </AppText>
@@ -59,10 +77,10 @@ export function ConfirmDialog({
             <Button
               variant="ghost"
               onPress={onCancel}
-              accessibilityLabel={cancelLabel}
+              accessibilityLabel={resolvedCancelLabel}
               style={styles.cancelBtn}
             >
-              {cancelLabel}
+              {resolvedCancelLabel}
             </Button>
             <Button
               variant={destructive ? 'danger' : 'primary'}

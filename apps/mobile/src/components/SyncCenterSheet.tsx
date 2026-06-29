@@ -10,17 +10,20 @@
  * component. RTL: all rows use flexDirection 'row' which mirrors in RTL.
  * All strings from i18n — no hardcoded Arabic.
  *
+ * Performance (ADR-0011 §Q4, AC 16): SectionList replaces ScrollView+map so
+ * large queues (>20 entries) are fully virtualized.
+ *
  * Actions:
  *   Retry single: retryDeadEntries(localId)
  *   Retry all: retryDeadEntries('all')
  *   Discard single: discardDeadEntries(localId)
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   Alert,
   Modal,
   Pressable,
-  ScrollView,
+  SectionList,
   StyleSheet,
   View,
 } from 'react-native';
@@ -47,6 +50,12 @@ interface SyncCenterSheetProps {
   visible: boolean;
   onClose: () => void;
 }
+
+// SectionList section type — discriminates failed vs pending.
+type SyncSection = {
+  key: 'failed' | 'pending';
+  data: OutboxEntry[];
+};
 
 export function SyncCenterSheet({ visible, onClose }: SyncCenterSheetProps) {
   const { t } = useTranslation();
@@ -89,6 +98,32 @@ export function SyncCenterSheet({ visible, onClose }: SyncCenterSheetProps) {
 
   const { iconName, iconColor, stateLabel } = headerConfig(syncState, t);
 
+  // Build sections — omit empty sections so SectionList renders correctly.
+  const sections = useMemo<SyncSection[]>(() => {
+    const result: SyncSection[] = [];
+    if (failed.length > 0) result.push({ key: 'failed', data: failed });
+    if (pending.length > 0) result.push({ key: 'pending', data: pending });
+    return result;
+  }, [failed, pending]);
+
+  // Rendered once above all sections.
+  const ListHeader = (
+    <View>
+      {store.lastSyncedAt && (
+        <View style={styles.lastSynced}>
+          <AppText role="caption" color={colors.textFaint}>
+            {t('sync.center.lastSynced', {
+              time: new Date(store.lastSyncedAt).toLocaleTimeString('ar-EG', {
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+            })}
+          </AppText>
+        </View>
+      )}
+    </View>
+  );
+
   return (
     <Modal
       visible={visible}
@@ -98,7 +133,7 @@ export function SyncCenterSheet({ visible, onClose }: SyncCenterSheetProps) {
       accessible
     >
       <View style={styles.container}>
-        {/* Header */}
+        {/* Non-scrolling app header */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <Icon name={iconName} size={22} color={iconColor} />
@@ -120,83 +155,68 @@ export function SyncCenterSheet({ visible, onClose }: SyncCenterSheetProps) {
           </Pressable>
         </View>
 
-        {/* Last synced */}
-        {store.lastSyncedAt && (
-          <View style={styles.lastSynced}>
-            <AppText role="caption" color={colors.textFaint}>
-              {t('sync.center.lastSynced', {
-                time: new Date(store.lastSyncedAt).toLocaleTimeString('ar-EG', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                }),
-              })}
-            </AppText>
-          </View>
-        )}
-
-        <ScrollView
+        {/* Virtualized queue list (AC 16) */}
+        <SectionList<OutboxEntry, SyncSection>
+          sections={sections}
+          keyExtractor={(item) => item.localId}
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-        >
-          {/* Failed entries (dead-letter) */}
-          {failed.length > 0 && (
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <AppText role="label" color={colors.danger}>
-                  {t('sync.center.failedTitle', { count: failed.length, countDisplay: toArabicDigits(String(failed.length)) })}
-                </AppText>
-                <Pressable
-                  onPress={handleRetryAll}
-                  accessible
-                  accessibilityRole="button"
-                  accessibilityLabel={t('sync.center.retryAll')}
-                >
-                  <AppText role="caption" color={colors.primary}>
-                    {t('sync.center.retryAll')}
-                  </AppText>
-                </Pressable>
-              </View>
-              {failed.map((entry) => (
-                <QueueEntryRow
-                  key={entry.localId}
-                  entry={entry}
-                  variant="failed"
-                  onRetry={() => void handleRetry(entry.localId)}
-                  onDiscard={() => void handleDiscard(entry.localId)}
-                  t={t}
-                />
-              ))}
-            </View>
-          )}
-
-          {/* Pending entries */}
-          {pending.length > 0 && (
-            <View style={styles.section}>
-              <AppText role="label" color={colors.textMuted} style={styles.sectionTitle}>
-                {t('sync.center.pendingTitle', { count: pending.length, countDisplay: toArabicDigits(String(pending.length)) })}
-              </AppText>
-              {pending.map((entry) => (
-                <QueueEntryRow
-                  key={entry.localId}
-                  entry={entry}
-                  variant="pending"
-                  t={t}
-                />
-              ))}
-            </View>
-          )}
-
-          {/* Empty state */}
-          {pending.length === 0 && failed.length === 0 && (
+          ListHeaderComponent={ListHeader}
+          ListEmptyComponent={
             <View style={styles.empty}>
               <Icon name="checkmark-circle-outline" size={40} color={colors.primary} />
               <AppText role="body" color={colors.textMuted} align="center">
                 {t('sync.center.allSynced')}
               </AppText>
             </View>
+          }
+          renderSectionHeader={({ section }) => {
+            if (section.key === 'failed') {
+              return (
+                <View style={styles.sectionHeader}>
+                  <AppText role="label" color={colors.danger}>
+                    {t('sync.center.failedTitle', {
+                      count: section.data.length,
+                      countDisplay: toArabicDigits(String(section.data.length)),
+                    })}
+                  </AppText>
+                  <Pressable
+                    onPress={() => void handleRetryAll()}
+                    accessible
+                    accessibilityRole="button"
+                    accessibilityLabel={t('sync.center.retryAll')}
+                  >
+                    <AppText role="caption" color={colors.primary}>
+                      {t('sync.center.retryAll')}
+                    </AppText>
+                  </Pressable>
+                </View>
+              );
+            }
+            return (
+              <View style={styles.sectionHeader}>
+                <AppText role="label" color={colors.textMuted}>
+                  {t('sync.center.pendingTitle', {
+                    count: section.data.length,
+                    countDisplay: toArabicDigits(String(section.data.length)),
+                  })}
+                </AppText>
+              </View>
+            );
+          }}
+          renderItem={({ item, section }) => (
+            <QueueEntryRow
+              entry={item}
+              variant={section.key}
+              onRetry={section.key === 'failed' ? () => void handleRetry(item.localId) : undefined}
+              onDiscard={section.key === 'failed' ? () => handleDiscard(item.localId) : undefined}
+              t={t}
+            />
           )}
-        </ScrollView>
+          SectionSeparatorComponent={() => <View style={styles.sectionGap} />}
+          ItemSeparatorComponent={() => <View style={styles.itemSeparator} />}
+        />
       </View>
     </Modal>
   );
@@ -343,19 +363,20 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: spacing.md,
-    gap: spacing.md,
-  },
-  section: {
-    gap: spacing.xs,
+    paddingBottom: spacing['3xl'],
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.xs,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.surface,
   },
-  sectionTitle: {
-    marginBottom: spacing.xs,
+  sectionGap: {
+    height: spacing.md,
+  },
+  itemSeparator: {
+    height: spacing.xs,
   },
   row: {
     flexDirection: 'row',

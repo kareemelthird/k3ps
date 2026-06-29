@@ -12,8 +12,8 @@ Built phase by phase. Each phase runs through the `feature` workflow and ends at
 | **6. Owner web dashboard + Reports** | KPIs, charts, reports by date/device/product, CSV export | backend, web | ⬜ |
 | **7. Super-admin portal** | Tenant lifecycle, support tools, guarded+audited impersonation | backend, web | ⬜ |
 | **8. Offline-first hardening** | Port/harden the outbox + realtime for multi-tenant; dead-letter + sync UI | core, backend, mobile | ⬜ |
-| **9. SaaS billing** | Stripe subscriptions, trial → tiers, paywall, super-admin plan management | backend, web | ⬜ |
-| **10. Production hardening** | Sentry, audit trail, EAS builds, performance, a11y, full security pass | all | ⬜ |
+| **9. SaaS billing** | Stripe subscriptions, trial → tiers, paywall, super-admin plan management | backend, web | ✅ approved |
+| **10. Production hardening** | Sentry, audit trail, EAS builds, performance, a11y, full security pass | all | 🟡 active (final phase) |
 
 ## Principles
 - **Learn from the trial, build fresh** — reuse the sound algorithms (pricing/money/time/inventory) and the offline-sync idea, with a cleaner API and improvements; never copy its UI or import its code (`learn-from-trial` skill).

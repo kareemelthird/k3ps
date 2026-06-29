@@ -32,4 +32,5 @@ export * from './shifts';
 export * from './reports';
 export * from './outbox';
 export * from './entitlements';
+export * from './observability';
 export * from './types';

@@ -1,12 +1,14 @@
 /**
  * Root layout — boot sequence:
- * 1. Force RTL (Arabic-first — mobile-patterns.md)
- * 2. Init i18n
- * 3. Restore Supabase session + active branch
- * 4. Listen to auth state changes (onAuthStateChange)
+ * 1. Sentry init (DSN-gated; true no-op when EXPO_PUBLIC_SENTRY_DSN absent)
+ * 2. Force RTL (Arabic-first — mobile-patterns.md)
+ * 3. Init i18n
+ * 4. Restore Supabase session + active branch
+ * 5. Listen to auth state changes (onAuthStateChange)
  * Route by auth state and role.
  */
 import '../src/i18n'; // side-effect: initialises i18next
+import { initSentry, Sentry } from '../src/observability/sentry';
 import React, { useEffect } from 'react';
 import { I18nManager, View } from 'react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -19,6 +21,10 @@ import { useAuth } from '../src/stores/useAuth';
 import { useNetworkWatcher } from '../src/hooks/useNetworkWatcher';
 import { initOutbox } from '../src/lib/outbox';
 import { colors } from '../src/design/tokens';
+
+// Sentry init runs at module scope — before any component mounts.
+// DSN-gated: true no-op when EXPO_PUBLIC_SENTRY_DSN is absent (dev/CI). (AC 1)
+initSentry();
 
 // Force RTL at the earliest possible moment (CLAUDE.md §6, mobile-patterns.md)
 I18nManager.allowRTL(true);
@@ -78,10 +84,14 @@ function RootLayoutInner() {
   );
 }
 
-export default function RootLayout() {
+function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <RootLayoutInner />
     </QueryClientProvider>
   );
 }
+
+// Wrap with Sentry error boundary (captures unhandled errors + crashes).
+// When DSN absent / init skipped, Sentry.wrap is a safe pass-through. (AC 1)
+export default Sentry.wrap(RootLayout);

@@ -9,6 +9,14 @@
  *   - Adjust (owner-only, gated on JWT role): records reason='adjust', ±delta + note.
  *     RLS also enforces the owner-only rule DB-side.
  *
+ * Performance (ADR-0011 §Q4, AC 16): products list uses FlatList — not
+ * ScrollView+map — so the screen stays smooth as catalog grows past 20 rows.
+ * Movement history inside the Sheet also uses FlatList.
+ *
+ * A11y (ADR-0011 §Q5, AC 22): StockCard rows expose accessibilityRole + state;
+ * action buttons carry 44pt touch targets (TAP_TARGET); error alerts use
+ * accessibilityRole="alert". (AC 22)
+ *
  * INVARIANTS:
  *   - On-hand ALWAYS from the view / computeLevels — never ad-hoc sum.
  *   - stockStatus drives badges (out/low/ok/untracked).
@@ -17,9 +25,9 @@
  */
 import React, { useMemo, useState } from 'react';
 import {
+  FlatList,
   Pressable,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   TextInput,
   View,
@@ -27,7 +35,6 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import {
-  formatEgp,
   stockStatus,
   toArabicDigits,
 } from '@ps/core';
@@ -54,6 +61,13 @@ import { ErrorState } from '../../src/components/ErrorState';
 import { DeviceCardSkeleton } from '../../src/components/Skeleton';
 import { OfflineBanner } from '../../src/components/OfflineBanner';
 
+// ── List item discriminant ─────────────────────────────────────────────────────
+// Using a discriminated union so FlatList can handle both tracked and untracked
+// products in a single virtualized list without two separate ScrollView maps.
+type StockListItem =
+  | { kind: 'tracked'; product: ProductRow }
+  | { kind: 'untracked'; product: ProductRow };
+
 // ─── Stock row card ───────────────────────────────────────────────────────────
 
 function StockCard({
@@ -73,7 +87,11 @@ function StockCard({
 
   if (!isProductTracked(product.stock)) {
     return (
-      <View style={styles.stockCard}>
+      <View
+        style={styles.stockCard}
+        accessible
+        accessibilityLabel={`${product.name} — ${t('stock.status.untracked')}`}
+      >
         <View style={styles.stockCardRow}>
           <AppText role="label">{product.name}</AppText>
           <View style={[styles.badge, { backgroundColor: colors.textFaint }]}>
@@ -94,9 +112,14 @@ function StockCard({
     out: colors.danger,
     untracked: colors.textFaint,
   };
+  const statusColor = colorMap[status] ?? colors.textFaint;
 
   return (
-    <View style={styles.stockCard}>
+    <View
+      style={styles.stockCard}
+      accessible
+      accessibilityLabel={`${product.name} — ${t(`stock.status.${status}`)} — ${toArabicDigits(String(onHand ?? 0))}`}
+    >
       <View style={styles.stockCardRow}>
         <View style={styles.stockCardLeft}>
           <AppText role="label">{product.name}</AppText>
@@ -107,12 +130,12 @@ function StockCard({
           ) : null}
         </View>
         <View style={styles.stockCardRight}>
-          <View style={[styles.badge, { backgroundColor: colorMap[status] ?? colors.textFaint }]}>
+          <View style={[styles.badge, { backgroundColor: statusColor }]}>
             <AppText role="micro" color={colors.onPrimary}>
               {t(`stock.status.${status}`)}
             </AppText>
           </View>
-          <AppText role="h3" color={colorMap[status] ?? colors.text}>
+          <AppText role="h3" color={statusColor}>
             {toArabicDigits(String(onHand ?? 0))}
           </AppText>
         </View>
@@ -213,6 +236,18 @@ export default function StockScreen() {
     return m;
   }, [stockLevels]);
 
+  // ── Combined virtualized list data (AC 16 — FlatList, not ScrollView+map) ──
+  // Tracked products first so action buttons appear at the top; untracked at the bottom.
+  const stockListData = useMemo<StockListItem[]>(() => {
+    const tracked = (products ?? [])
+      .filter((p) => isProductTracked(p.stock))
+      .map((p): StockListItem => ({ kind: 'tracked', product: p }));
+    const untracked = (products ?? [])
+      .filter((p) => !isProductTracked(p.stock))
+      .map((p): StockListItem => ({ kind: 'untracked', product: p }));
+    return [...tracked, ...untracked];
+  }, [products]);
+
   // ── Handlers ──
   const handleRestock = async () => {
     if (!restockProduct || !tenantId || !branchId || !managerId) return;
@@ -270,7 +305,51 @@ export default function StockScreen() {
     }
   };
 
-  // ── Render ──
+  // ── Render item ──
+  const renderStockItem = ({ item }: { item: StockListItem }) => {
+    const { product } = item;
+    if (item.kind === 'tracked') {
+      return (
+        <Pressable
+          onLongPress={() => setHistoryProduct(product)}
+          accessibilityLabel={`${product.name} — ${t('stock.movements.title')}`}
+          accessibilityHint={t('stock.movements.title')}
+          accessibilityRole="button"
+          style={styles.stockItemPressable}
+        >
+          <StockCard
+            product={product}
+            onHand={stockMap.get(product.id)}
+            onRestock={() => {
+              setRestockProduct(product);
+              setRestockQty('');
+              setRestockNote('');
+              setRestockError(null);
+            }}
+            onAdjust={() => {
+              setAdjustProduct(product);
+              setAdjustDelta('');
+              setAdjustNote('');
+              setAdjustError(null);
+            }}
+            canAdjust={isOwner}
+          />
+        </Pressable>
+      );
+    }
+    // Untracked — informational only, not interactive for stock actions
+    return (
+      <StockCard
+        product={product}
+        onHand={undefined}
+        onRestock={() => {}}
+        onAdjust={() => {}}
+        canAdjust={false}
+      />
+    );
+  };
+
+  // ── Loading / error early returns ──
   if (isLoading) {
     return (
       <SafeAreaView style={styles.screen}>
@@ -294,9 +373,6 @@ export default function StockScreen() {
     );
   }
 
-  const trackedProducts = (products ?? []).filter((p) => isProductTracked(p.stock));
-  const untrackedProducts = (products ?? []).filter((p) => !isProductTracked(p.stock));
-
   return (
     <SafeAreaView style={styles.screen}>
       <OfflineBanner />
@@ -305,54 +381,19 @@ export default function StockScreen() {
         <AppText role="h2">{t('stock.title')}</AppText>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {(products ?? []).length === 0 && (
+      {/* Virtualized product list (AC 16 — FlatList replaces ScrollView+map) */}
+      <FlatList
+        data={stockListData}
+        keyExtractor={(item) => item.product.id}
+        renderItem={renderStockItem}
+        contentContainerStyle={styles.scrollContent}
+        ListEmptyComponent={
           <EmptyState
             title={t('orders.emptyProducts.title')}
             body={t('orders.emptyProducts.body')}
           />
-        )}
-
-        {/* Tracked products */}
-        {trackedProducts.map((product) => (
-          <Pressable
-            key={product.id}
-            onLongPress={() => setHistoryProduct(product)}
-            accessibilityLabel={`${product.name} — ${t('stock.movements.title')}`}
-            accessibilityHint={t('stock.movements.title')}
-          >
-            <StockCard
-              product={product}
-              onHand={stockMap.get(product.id)}
-              onRestock={() => {
-                setRestockProduct(product);
-                setRestockQty('');
-                setRestockNote('');
-                setRestockError(null);
-              }}
-              onAdjust={() => {
-                setAdjustProduct(product);
-                setAdjustDelta('');
-                setAdjustNote('');
-                setAdjustError(null);
-              }}
-              canAdjust={isOwner}
-            />
-          </Pressable>
-        ))}
-
-        {/* Untracked products */}
-        {untrackedProducts.map((product) => (
-          <StockCard
-            key={product.id}
-            product={product}
-            onHand={undefined}
-            onRestock={() => {}}
-            onAdjust={() => {}}
-            canAdjust={false}
-          />
-        ))}
-      </ScrollView>
+        }
+      />
 
       {/* Restock sheet */}
       <Sheet
@@ -456,22 +497,24 @@ export default function StockScreen() {
         )}
       </Sheet>
 
-      {/* History sheet (long-press) */}
+      {/* Movement history sheet (long-press on a tracked product)
+          Uses FlatList so history of 100+ movements stays smooth. */}
       <Sheet
         visible={Boolean(historyProduct)}
         onClose={() => setHistoryProduct(null)}
         title={`${t('stock.movements.title')} — ${historyProduct?.name ?? ''}`}
       >
-        <ScrollView style={styles.movementsScroll}>
-          {(movements ?? []).length === 0 && (
+        <FlatList
+          data={movements ?? []}
+          keyExtractor={(m) => m.id}
+          renderItem={({ item }) => <MovementRow movement={item} />}
+          style={styles.movementsScroll}
+          ListEmptyComponent={
             <AppText role="caption" color={colors.textMuted}>
               {t('stock.movements.title')}
             </AppText>
-          )}
-          {(movements ?? []).map((m) => (
-            <MovementRow key={m.id} movement={m} />
-          ))}
-        </ScrollView>
+          }
+        />
       </Sheet>
     </SafeAreaView>
   );
@@ -499,6 +542,9 @@ const styles = StyleSheet.create({
   loadingGrid: {
     padding: spacing.md,
     gap: spacing.sm,
+  },
+  stockItemPressable: {
+    // Ensures the long-press target is the full card area
   },
   stockCard: {
     backgroundColor: colors.surface2,

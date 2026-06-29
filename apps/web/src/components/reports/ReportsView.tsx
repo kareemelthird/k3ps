@@ -32,16 +32,37 @@ import {
 } from '@ps/core';
 import { getBrowserClient } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/AuthContext';
+import dynamic from 'next/dynamic';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { ScopeBar } from './ScopeBar';
 import { KpiRow } from './KpiRow';
 import { ChartCard } from './ChartCard';
 import { ReportTabs } from './ReportTabs';
-import { RevenueOverTimeChart } from './charts/RevenueOverTimeChart';
-import { RevenueSplitChart } from './charts/RevenueSplitChart';
-import { TopProductsChart } from './charts/TopProductsChart';
-import { DeviceUtilizationChart } from './charts/DeviceUtilizationChart';
-import { PaymentMixChart } from './charts/PaymentMixChart';
 import { ByDayTable, ByDeviceTable, ByProductTable, ByShiftTable } from './ReportTable';
+
+// ── Lazy-loaded chart components (recharts is client-only and ~200 kB; ADR-0011 Q4) ──
+// ssr: false — recharts uses DOM APIs unavailable in Node/SSR.
+// loading: Skeleton placeholder maintains layout space (prevents CLS) while chunk loads.
+const RevenueOverTimeChart = dynamic(
+  () => import('./charts/RevenueOverTimeChart').then((m) => ({ default: m.RevenueOverTimeChart })),
+  { ssr: false, loading: () => <Skeleton className="h-[240px] w-full" /> },
+);
+const RevenueSplitChart = dynamic(
+  () => import('./charts/RevenueSplitChart').then((m) => ({ default: m.RevenueSplitChart })),
+  { ssr: false, loading: () => <Skeleton className="h-[240px] w-full" /> },
+);
+const TopProductsChart = dynamic(
+  () => import('./charts/TopProductsChart').then((m) => ({ default: m.TopProductsChart })),
+  { ssr: false, loading: () => <Skeleton className="h-[280px] w-full" /> },
+);
+const DeviceUtilizationChart = dynamic(
+  () => import('./charts/DeviceUtilizationChart').then((m) => ({ default: m.DeviceUtilizationChart })),
+  { ssr: false, loading: () => <Skeleton className="h-[240px] w-full" /> },
+);
+const PaymentMixChart = dynamic(
+  () => import('./charts/PaymentMixChart').then((m) => ({ default: m.PaymentMixChart })),
+  { ssr: false, loading: () => <Skeleton className="h-[240px] w-full" /> },
+);
 import type { Branch } from '@ps/core';
 import type {
   RevenueByDayRow,

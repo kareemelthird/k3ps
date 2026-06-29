@@ -23,11 +23,10 @@ import { useTranslations } from 'next-intl';
 import {
   formatEgp,
   toArabicDigits,
-  uuidv5,
-  PS_UUID_NS,
 } from '@ps/core';
 import type { Product } from '@ps/core';
 import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { ProductForm } from './ProductForm';
@@ -205,41 +204,7 @@ function ProductCard({
 
 // ─── Modal overlay ────────────────────────────────────────────────────────────
 
-function ModalOverlay({
-  children,
-  onClose,
-}: {
-  children: React.ReactNode;
-  onClose: () => void;
-}) {
-  const t = useTranslations();
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-md"
-      style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
-      <div
-        className="relative z-10 w-full max-w-lg bg-surface rounded-lg border border-border shadow-e3 p-xl max-h-[90dvh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={onClose}
-          aria-label={t('action.close')}
-          className="absolute top-md end-md text-text-muted hover:text-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-xs p-xs"
-        >
-          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-        {children}
-      </div>
-    </div>
-  );
-}
+// ModalOverlay replaced by the shared <Dialog> component (ADR-0011 §Q5 a11y).
 
 // ─── Confirm dialog ───────────────────────────────────────────────────────────
 
@@ -374,28 +339,8 @@ export function ProductsView({ isOwner }: ProductsViewProps) {
         .eq('id', product.id);
       if (err) throw err;
 
-      // Audit write — idempotent upsert with a deterministic id (ADR-0006 Decision 7,
-      // CLAUDE.md §2.8); error surfaced, not swallowed (§2.7).
-      // tenant_id and actor_id are required NOT NULL columns.
-      const { error: auditErr } = await supabase.from('audit_log').upsert(
-        {
-          id: uuidv5(`product.deactivate:${product.id}:${now}`, PS_UUID_NS),
-          tenant_id: tenantId,
-          actor_id: actorId,
-          action: 'product.deactivate',
-          entity: 'product',
-          entity_id: product.id,
-          amount: null,
-          meta: {
-            before: { is_active: true },
-            after: { is_active: false },
-            snapshot: { name: product.name, category: product.category, price: product.price },
-          },
-          created_at: now,
-        },
-        { onConflict: 'id' },
-      );
-      if (auditErr) throw auditErr;
+      // Audit write removed: migration 0011 audit_config_change trigger handles
+      // this atomically on the products UPDATE (ADR-0011 §Q3).
 
       setProducts((prev) =>
         prev.map((p) => (p.id === product.id ? { ...p, is_active: false } : p)),
@@ -424,27 +369,8 @@ export function ProductsView({ isOwner }: ProductsViewProps) {
         .eq('id', product.id);
       if (err) throw err;
 
-      // Audit write — idempotent upsert with a deterministic id (ADR-0006 Decision 7,
-      // CLAUDE.md §2.8); error surfaced, not swallowed (§2.7).
-      const { error: auditErr } = await supabase.from('audit_log').upsert(
-        {
-          id: uuidv5(`product.reactivate:${product.id}:${now}`, PS_UUID_NS),
-          tenant_id: tenantId,
-          actor_id: actorId,
-          action: 'product.reactivate',
-          entity: 'product',
-          entity_id: product.id,
-          amount: null,
-          meta: {
-            before: { is_active: false },
-            after: { is_active: true },
-            snapshot: { name: product.name, category: product.category, price: product.price },
-          },
-          created_at: now,
-        },
-        { onConflict: 'id' },
-      );
-      if (auditErr) throw auditErr;
+      // Audit write removed: migration 0011 audit_config_change trigger handles
+      // this atomically on the products UPDATE (ADR-0011 §Q3).
 
       setProducts((prev) =>
         prev.map((p) => (p.id === product.id ? { ...p, is_active: true } : p)),
@@ -579,52 +505,57 @@ export function ProductsView({ isOwner }: ProductsViewProps) {
         </div>
       )}
 
-      {/* Modal overlay */}
-      {modal && (
-        <ModalOverlay onClose={() => setModal(null)}>
-          {modal.type === 'create' && (
-            <div className="space-y-lg">
-              <h2 className="text-h2 text-text">{t('products.create')}</h2>
-              <ProductForm
-                onSuccess={handleSaved}
-                onCancel={() => setModal(null)}
-              />
-            </div>
-          )}
+      {/* Accessible dialog — focus trap, focus return, Escape key (ADR-0011 §Q5) */}
+      {modal && modal.type === 'create' && (
+        <Dialog labelledBy="products-dialog-title" onClose={() => setModal(null)}>
+          <div className="space-y-lg">
+            <h2 id="products-dialog-title" className="text-h2 text-text">
+              {t('products.create')}
+            </h2>
+            <ProductForm onSuccess={handleSaved} onCancel={() => setModal(null)} />
+          </div>
+        </Dialog>
+      )}
 
-          {modal.type === 'edit' && (
-            <div className="space-y-lg">
-              <h2 className="text-h2 text-text">{t('products.edit')}</h2>
-              <ProductForm
-                initial={modal.product}
-                onSuccess={handleSaved}
-                onCancel={() => setModal(null)}
-              />
-            </div>
-          )}
-
-          {modal.type === 'deactivate' && (
-            <ConfirmDialog
-              message={t('products.action.deactivateConfirm')}
-              confirmLabel={t('products.action.deactivate')}
-              confirmVariant="danger"
-              loading={pendingId === modal.product.id}
-              onConfirm={() => void handleDeactivate(modal.product)}
+      {modal && modal.type === 'edit' && (
+        <Dialog labelledBy="products-dialog-title" onClose={() => setModal(null)}>
+          <div className="space-y-lg">
+            <h2 id="products-dialog-title" className="text-h2 text-text">
+              {t('products.edit')}
+            </h2>
+            <ProductForm
+              initial={modal.product}
+              onSuccess={handleSaved}
               onCancel={() => setModal(null)}
             />
-          )}
+          </div>
+        </Dialog>
+      )}
 
-          {modal.type === 'reactivate' && (
-            <ConfirmDialog
-              message={t('products.action.reactivateConfirm')}
-              confirmLabel={t('products.action.reactivate')}
-              confirmVariant="primary"
-              loading={pendingId === modal.product.id}
-              onConfirm={() => void handleReactivate(modal.product)}
-              onCancel={() => setModal(null)}
-            />
-          )}
-        </ModalOverlay>
+      {modal && modal.type === 'deactivate' && (
+        <Dialog ariaLabel={t('products.action.deactivate')} onClose={() => setModal(null)}>
+          <ConfirmDialog
+            message={t('products.action.deactivateConfirm')}
+            confirmLabel={t('products.action.deactivate')}
+            confirmVariant="danger"
+            loading={pendingId === modal.product.id}
+            onConfirm={() => void handleDeactivate(modal.product)}
+            onCancel={() => setModal(null)}
+          />
+        </Dialog>
+      )}
+
+      {modal && modal.type === 'reactivate' && (
+        <Dialog ariaLabel={t('products.action.reactivate')} onClose={() => setModal(null)}>
+          <ConfirmDialog
+            message={t('products.action.reactivateConfirm')}
+            confirmLabel={t('products.action.reactivate')}
+            confirmVariant="primary"
+            loading={pendingId === modal.product.id}
+            onConfirm={() => void handleReactivate(modal.product)}
+            onCancel={() => setModal(null)}
+          />
+        </Dialog>
       )}
     </div>
   );

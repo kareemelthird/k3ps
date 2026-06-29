@@ -15,7 +15,7 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { egpToPiastres, piastresToEgp, uuidv4, uuidv5, PS_UUID_NS } from '@ps/core';
+import { egpToPiastres, piastresToEgp, uuidv4 } from '@ps/core';
 import type { RateRule, BillingMode, PlayModeRule, DayTypeRule } from '@ps/core';
 import { Button } from '@/components/ui/Button';
 import { TextField } from '@/components/ui/TextField';
@@ -276,47 +276,7 @@ export function RateRuleForm({ initial, onSuccess, onCancel }: RateRuleFormProps
 
       if (error) throw error;
 
-      // Write audit_log row (ADR-0005 Decision 5; action taxonomy locked)
-      const action = initial == null ? 'rate_rule.create' : 'rate_rule.update';
-      const auditMeta =
-        initial == null
-          ? { snapshot: row }
-          : {
-              before: {
-                device_type: initial.device_type,
-                billing_mode: initial.billing_mode,
-                price_per_hour: initial.price_per_hour,
-                is_active: initial.is_active,
-              },
-              after: {
-                device_type: row.device_type,
-                billing_mode: row.billing_mode,
-                price_per_hour: row.price_per_hour,
-                is_active: row.is_active,
-              },
-            };
-
-      // Audit write is a follow-on IDEMPOTENT upsert (ADR-0005 Decision 5,
-      // CLAUDE.md §2.8). The id is deterministic from the operation's identity
-      // (action:ruleId:instant) so a double-fire of the same save upserts the
-      // same row instead of duplicating. The error is surfaced (not swallowed):
-      // a missing audit row on a money-config change must be visible (§2.7).
-      // tenant_id and actor_id are required NOT NULL columns (0002 migration).
-      const { error: auditErr } = await supabase.from('audit_log').upsert(
-        {
-          id: uuidv5(`${action}:${id}:${now}`, PS_UUID_NS),
-          tenant_id: tenantId,
-          actor_id: actorId,
-          action,
-          entity: 'rate_rule',
-          entity_id: id,
-          amount: null,
-          meta: auditMeta,
-          created_at: now,
-        },
-        { onConflict: 'id' },
-      );
-      if (auditErr) throw auditErr;
+      // Audit write removed: migration 0012 audit_config_change trigger handles this atomically on the rate_rules INSERT/UPDATE (ADR-0011 §Q3).
 
       onSuccess(data as RateRule);
     } catch (err) {

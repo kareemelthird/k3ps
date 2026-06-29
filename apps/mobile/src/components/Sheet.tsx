@@ -1,7 +1,10 @@
 /**
  * Sheet — design system §9.3.
  * Bottom sheet: top corners lg radius, drag handle, scrim, safe-area padding.
- * Slides up from trigger; focus trapped; Esc closes.
+ * Slides up from trigger; focus trapped (accessibilityViewIsModal); Esc closes.
+ *
+ * A11y (ADR-0011 §Q5): accessibilityViewIsModal traps screen-reader focus inside
+ * the sheet. Close label via i18n — no hardcoded Arabic strings. (AC 22)
  */
 import React from 'react';
 import {
@@ -13,6 +16,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 
 import { colors, radius, spacing } from '../design/tokens';
 import { AppText } from './AppText';
@@ -32,6 +36,9 @@ export function Sheet({
   children,
   dismissible = true,
 }: Props) {
+  const { t } = useTranslation();
+  const closeLabel = t('action.close');
+
   return (
     <Modal
       visible={visible}
@@ -39,12 +46,13 @@ export function Sheet({
       animationType="slide"
       onRequestClose={dismissible ? onClose : undefined}
       statusBarTranslucent
+      accessibilityViewIsModal
     >
       {/* Scrim */}
       <Pressable
         style={styles.scrim}
         onPress={dismissible ? onClose : undefined}
-        accessibilityLabel="إغلاق"
+        accessibilityLabel={closeLabel}
         accessibilityRole="button"
       />
 
@@ -64,12 +72,13 @@ export function Sheet({
             {dismissible && (
               <Pressable
                 onPress={onClose}
-                accessibilityLabel="إغلاق"
+                accessibilityLabel={closeLabel}
                 accessibilityRole="button"
                 hitSlop={8}
+                style={styles.closeBtn}
               >
                 <AppText role="label" color={colors.textMuted}>
-                  ✕
+                  {'✕'}
                 </AppText>
               </Pressable>
             )}
@@ -117,6 +126,12 @@ const styles = StyleSheet.create({
   },
   title: {
     flex: 1,
+  },
+  closeBtn: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   content: {
     gap: spacing.md,

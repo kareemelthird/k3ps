@@ -7,6 +7,14 @@
  *   B. Walk-in: standalone order (session_id=null), paid directly with a
  *      payment_method (cash/wallet/other; debt NOT selectable).
  *
+ * Performance (ADR-0011 §Q4, AC 16): product catalog uses FlatList with numColumns=2
+ * as the outer scroll container so large catalogs (50+ products) stay smooth.
+ * Category filter + cart + walk-in orders live in ListHeaderComponent /
+ * ListFooterComponent respectively.
+ *
+ * A11y (ADR-0011 §Q5, AC 22): ProductCard carries accessibilityRole + state;
+ * error views use accessibilityRole="alert"; pay confirm button is labelled.
+ *
  * INVARIANTS:
  *   - unit_price snapshotted at add-time (catalog price at that instant).
  *   - computeOrderTotal from @ps/core — no inline money math.
@@ -64,7 +72,6 @@ function StockBadge({ product, onHand }: { product: ProductRow; onHand: number |
   const { t } = useTranslation();
   if (!isProductTracked(product.stock)) return null;
 
-  // stockStatus(onHand) — first param is on_hand (number | null | undefined).
   const status = stockStatus(onHand ?? null);
   const colorMap: Record<string, string> = {
     ok: colors.statusFree,
@@ -271,9 +278,8 @@ export default function OrdersScreen() {
   const { mutateAsync: voidItem, isPending: voidingItem } = useVoidOrderItem();
   const { mutateAsync: payOrder, isPending: payingOrder } = usePayWalkInOrder();
 
-  // ── Cart state (for new walk-in or session-attached order building) ──
-  const [mode, setMode] = useState<'walkin' | 'catalog'>('walkin');
-  const [cart, setCart] = useState<Map<string, number>>(new Map()); // productId → qty
+  // ── Cart state ──
+  const [cart, setCart] = useState<Map<string, number>>(new Map());
   const [addError, setAddError] = useState<string | null>(null);
 
   // ── Walk-in order being managed ──
@@ -290,9 +296,7 @@ export default function OrdersScreen() {
     return m;
   }, [stockLevels]);
 
-  // ── Category list (NIT 5: chip value and filter predicate use the same
-  //    raw category string; blank-category products are excluded from chips
-  //    since '' is the sentinel for "All") ──
+  // ── Category list ──
   const categories = useMemo(() => {
     const cats = new Set<string>();
     (products ?? []).forEach((p) => {
@@ -346,7 +350,7 @@ export default function OrdersScreen() {
 
     try {
       await addOrder({
-        sessionId: null, // walk-in
+        sessionId: null,
         tenantId,
         branchId,
         managerId,
@@ -429,7 +433,7 @@ export default function OrdersScreen() {
     { value: 'other', label: t('orders.pay.method.other') },
   ];
 
-  // ── Render ──
+  // ── Loading / error early returns ──
   if (productsLoading) {
     return (
       <SafeAreaView style={styles.screen}>
@@ -455,152 +459,162 @@ export default function OrdersScreen() {
     );
   }
 
+  // ── FlatList header: screen title + category filter ──
+  const ListHeader = (
+    <View>
+      <View style={styles.header}>
+        <AppText role="h2">{t('orders.title')}</AppText>
+      </View>
+      {categories.length > 1 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoryScroll}
+        >
+          {categories.map((cat) => (
+            <Pressable
+              key={cat || '__all__'}
+              onPress={() => setSelectedCategory(cat)}
+              style={[
+                styles.categoryChip,
+                selectedCategory === cat && styles.categoryChipActive,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={cat || t('orders.title')}
+              accessibilityState={{ selected: selectedCategory === cat }}
+            >
+              <AppText
+                role="caption"
+                color={selectedCategory === cat ? colors.onPrimary : colors.textMuted}
+              >
+                {cat || t('orders.title')}
+              </AppText>
+            </Pressable>
+          ))}
+        </ScrollView>
+      )}
+    </View>
+  );
+
+  // ── FlatList footer: cart + walk-in orders ──
+  const ListFooter = (
+    <View style={styles.footerContent}>
+      {/* Cart summary (new order) */}
+      {cart.size > 0 && (
+        <View style={styles.cartSection}>
+          <AppText role="h3" style={styles.sectionTitle}>
+            {t('orders.newOrder')}
+          </AppText>
+          {Array.from(cart.entries())
+            .filter(([, qty]) => qty > 0)
+            .map(([productId, qty]) => {
+              const product = (products ?? []).find((p) => p.id === productId);
+              if (!product) return null;
+              return (
+                <CartItemRow
+                  key={productId}
+                  item={{ productId, qty, unitPrice: product.price }}
+                  productName={product.name}
+                  onVoid={() => {
+                    setCart((prev) => {
+                      const next = new Map(prev);
+                      const current = next.get(productId) ?? 0;
+                      if (current <= 1) next.delete(productId);
+                      else next.set(productId, current - 1);
+                      return next;
+                    });
+                  }}
+                />
+              );
+            })}
+          <View style={styles.totalRow}>
+            <AppText role="label" color={colors.textMuted}>
+              {t('orders.total')}
+            </AppText>
+            <AppText role="h3" color={colors.primary}>
+              {formatEgp(cartTotal)}
+            </AppText>
+          </View>
+          {addError && (
+            <View accessibilityRole="alert" accessible>
+              <AppText role="caption" color={colors.danger}>{addError}</AppText>
+            </View>
+          )}
+          <Button
+            variant="primary"
+            size="lg"
+            fullWidth
+            loading={addingOrder}
+            onPress={() => void handleSubmitOrder()}
+            accessibilityLabel={t('orders.walkinOrder')}
+          >
+            {t('orders.walkinOrder')}
+          </Button>
+        </View>
+      )}
+
+      {/* Open walk-in orders */}
+      {(walkInOrders ?? []).length > 0 && (
+        <View style={styles.walkInSection}>
+          <AppText role="h3" style={styles.sectionTitle}>
+            {t('orders.walkin')}
+          </AppText>
+          {(walkInOrders ?? []).map((order) => (
+            <View key={order.id} style={styles.orderCard}>
+              <OrderItemsList
+                order={order}
+                products={products ?? []}
+                onVoidItem={(item) => void handleVoidItem(order, item)}
+              />
+              <Button
+                variant="primary"
+                size="md"
+                fullWidth
+                onPress={() => {
+                  setActiveWalkInOrder(order);
+                  setPayMethod('cash');
+                  setPayError(null);
+                  setPaySheetVisible(true);
+                }}
+                accessibilityLabel={t('orders.pay.confirm')}
+              >
+                {t('orders.pay.confirm')}
+              </Button>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+
+  // ── Render — FlatList as outer scroll container (AC 16 — virtualized catalog) ──
   return (
     <SafeAreaView style={styles.screen}>
       <OfflineBanner />
 
-      {/* Header */}
-      <View style={styles.header}>
-        <AppText role="h2">{t('orders.title')}</AppText>
-      </View>
-
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-        {/* Category filter */}
-        {categories.length > 1 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.categoryScroll}
-          >
-            {categories.map((cat) => (
-              <Pressable
-                key={cat || '__all__'}
-                onPress={() => setSelectedCategory(cat)}
-                style={[
-                  styles.categoryChip,
-                  selectedCategory === cat && styles.categoryChipActive,
-                ]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: selectedCategory === cat }}
-              >
-                <AppText
-                  role="caption"
-                  color={selectedCategory === cat ? colors.onPrimary : colors.textMuted}
-                >
-                  {/* '' sentinel = "All products" chip; non-empty = raw category */}
-                  {cat || t('orders.title')}
-                </AppText>
-              </Pressable>
-            ))}
-          </ScrollView>
+      <FlatList
+        data={filteredProducts}
+        numColumns={2}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <ProductCard
+            product={item}
+            onHand={stockMap.get(item.id)}
+            qty={cart.get(item.id) ?? 0}
+            onPress={() => handleAddToCart(item)}
+          />
         )}
-
-        {/* Product grid */}
-        {filteredProducts.length === 0 ? (
+        columnWrapperStyle={styles.productGridRow}
+        contentContainerStyle={styles.flatListContent}
+        ListHeaderComponent={ListHeader}
+        ListEmptyComponent={
           <EmptyState
             title={t('orders.emptyProducts.title')}
             body={t('orders.emptyProducts.body')}
           />
-        ) : (
-          <View style={styles.productGrid}>
-            {filteredProducts.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                onHand={stockMap.get(product.id)}
-                qty={cart.get(product.id) ?? 0}
-                onPress={() => handleAddToCart(product)}
-              />
-            ))}
-          </View>
-        )}
-
-        {/* Cart summary (new order) */}
-        {cart.size > 0 && (
-          <View style={styles.cartSection}>
-            <AppText role="h3" style={styles.sectionTitle}>
-              {t('orders.newOrder')}
-            </AppText>
-            {Array.from(cart.entries())
-              .filter(([, qty]) => qty > 0)
-              .map(([productId, qty]) => {
-                const product = (products ?? []).find((p) => p.id === productId);
-                if (!product) return null;
-                return (
-                  <CartItemRow
-                    key={productId}
-                    item={{ productId, qty, unitPrice: product.price }}
-                    productName={product.name}
-                    onVoid={() => {
-                      setCart((prev) => {
-                        const next = new Map(prev);
-                        const current = next.get(productId) ?? 0;
-                        if (current <= 1) next.delete(productId);
-                        else next.set(productId, current - 1);
-                        return next;
-                      });
-                    }}
-                  />
-                );
-              })}
-            <View style={styles.totalRow}>
-              <AppText role="label" color={colors.textMuted}>
-                {t('orders.total')}
-              </AppText>
-              <AppText role="h3" color={colors.primary}>
-                {formatEgp(cartTotal)}
-              </AppText>
-            </View>
-            {addError && (
-              <View accessibilityRole="alert" accessible>
-                <AppText role="caption" color={colors.danger}>{addError}</AppText>
-              </View>
-            )}
-            <Button
-              variant="primary"
-              size="lg"
-              fullWidth
-              loading={addingOrder}
-              onPress={() => void handleSubmitOrder()}
-              accessibilityLabel={t('orders.walkinOrder')}
-            >
-              {t('orders.walkinOrder')}
-            </Button>
-          </View>
-        )}
-
-        {/* Open walk-in orders */}
-        {(walkInOrders ?? []).length > 0 && (
-          <View style={styles.walkInSection}>
-            <AppText role="h3" style={styles.sectionTitle}>
-              {t('orders.walkin')}
-            </AppText>
-            {(walkInOrders ?? []).map((order) => (
-              <View key={order.id} style={styles.orderCard}>
-                <OrderItemsList
-                  order={order}
-                  products={products ?? []}
-                  onVoidItem={(item) => void handleVoidItem(order, item)}
-                />
-                <Button
-                  variant="primary"
-                  size="md"
-                  fullWidth
-                  onPress={() => {
-                    setActiveWalkInOrder(order);
-                    setPayMethod('cash');
-                    setPayError(null);
-                    setPaySheetVisible(true);
-                  }}
-                  accessibilityLabel={t('orders.pay.confirm')}
-                >
-                  {t('orders.pay.confirm')}
-                </Button>
-              </View>
-            ))}
-          </View>
-        )}
-      </ScrollView>
+        }
+        ListFooterComponent={ListFooter}
+      />
 
       {/* Pay sheet */}
       <Sheet
@@ -670,12 +684,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
+  flatListContent: {
     paddingBottom: spacing['3xl'],
+  },
+  footerContent: {
     gap: spacing.lg,
+    paddingTop: spacing.md,
   },
   loadingGrid: {
     padding: spacing.md,
@@ -684,6 +698,7 @@ const styles = StyleSheet.create({
   categoryScroll: {
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
     gap: spacing.sm,
     flexDirection: 'row',
   },
@@ -698,18 +713,18 @@ const styles = StyleSheet.create({
   categoryChipActive: {
     backgroundColor: colors.primary,
   },
-  productGrid: {
+  // Product grid: FlatList manages numColumns=2; flex:1 fills each column.
+  productGridRow: {
     paddingHorizontal: spacing.xl,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    paddingTop: spacing.sm,
     gap: spacing.sm,
   },
   productCard: {
+    flex: 1,
     backgroundColor: colors.surface2,
     borderRadius: radius.md,
     padding: spacing.md,
     minHeight: TAP_TARGET,
-    width: '47%',
     gap: spacing['2xs'],
   },
   productCardPressed: {
@@ -751,7 +766,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cartSection: {
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.md,
     backgroundColor: colors.surface,
     marginHorizontal: spacing.md,
     borderRadius: radius.md,

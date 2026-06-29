@@ -32,6 +32,7 @@ module.exports = {
     'src/reports/report-helpers.ts',
     'src/outbox/outbox.ts',
     'src/entitlements/entitlements.ts',
+    'src/observability/scrub.ts',
     '!src/**/*.test.ts',
     '!src/**/__tests__/**',
   ],

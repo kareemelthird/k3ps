@@ -63,7 +63,9 @@ export function LimitReachedDialog({
   const resourceLabel = t(`resource.${resourceKey}`);
 
   return (
-    /* Backdrop */
+    // Backdrop wrapper: outside click closes dialog. jsx-a11y flags plain divs with
+    // click handlers, but the inner div carries role="alertdialog" and aria semantics.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center p-xl"
       onClick={(e) => e.target === e.currentTarget && onClose()}

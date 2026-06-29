@@ -13,6 +13,7 @@
   "dependencies": {
     "@ps/core": "*",
     "@react-native-async-storage/async-storage": "2.1.2",
+    "@sentry/react-native": "^6.22.0",
     "@supabase/supabase-js": "^2.49.4",
     "@tanstack/react-query": "^5.76.2",
     "expo": "^53.0.12",

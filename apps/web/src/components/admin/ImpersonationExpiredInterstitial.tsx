@@ -69,14 +69,13 @@ export function ImpersonationExpiredInterstitial({
 
         {/* Single action — no cancel, no dismiss (non-dismissible per design §7.3) */}
         <div className="flex justify-end">
-          <Button
-            autoFocus
-            variant="primary"
-            size="md"
-            onClick={onReturn}
-          >
+          {/* autoFocus is intentional: this non-dismissible interstitial must keep
+              focus on the action button so keyboard users cannot escape without acting. */}
+          {/* eslint-disable jsx-a11y/no-autofocus */}
+          <Button autoFocus variant="primary" size="md" onClick={onReturn}>
             {t('return')}
           </Button>
+          {/* eslint-enable jsx-a11y/no-autofocus */}
         </div>
       </div>
     </div>

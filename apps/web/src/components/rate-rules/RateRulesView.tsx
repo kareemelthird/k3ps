@@ -21,8 +21,6 @@ import { useTranslations } from 'next-intl';
 import {
   formatEgp,
   toArabicDigits,
-  uuidv5,
-  PS_UUID_NS,
 } from '@ps/core';
 import type { RateRule, BillingMode } from '@ps/core';
 import { Button } from '@/components/ui/Button';
@@ -151,24 +149,7 @@ export function RateRulesView({ isOwner }: RateRulesViewProps) {
         .eq('id', rule.id);
       if (err) throw err;
 
-      // Audit write — idempotent upsert with a deterministic id (ADR-0005
-      // Decision 5, CLAUDE.md §2.8); error surfaced, not swallowed (§2.7).
-      // tenant_id and actor_id are required NOT NULL columns (0002 migration).
-      const { error: auditErr } = await supabase.from('audit_log').upsert(
-        {
-          id: uuidv5(`rate_rule.deactivate:${rule.id}:${now}`, PS_UUID_NS),
-          tenant_id: tenantId,
-          actor_id: actorId,
-          action: 'rate_rule.deactivate',
-          entity: 'rate_rule',
-          entity_id: rule.id,
-          amount: null,
-          meta: { before: { is_active: true }, after: { is_active: false } },
-          created_at: now,
-        },
-        { onConflict: 'id' },
-      );
-      if (auditErr) throw auditErr;
+      // Audit write removed: migration 0012 audit_config_change trigger handles this atomically on the rate_rules INSERT/UPDATE (ADR-0011 §Q3).
 
       setRules((prev) =>
         prev.map((r) => (r.id === rule.id ? { ...r, is_active: false } : r)),
@@ -197,24 +178,7 @@ export function RateRulesView({ isOwner }: RateRulesViewProps) {
         .eq('id', rule.id);
       if (err) throw err;
 
-      // Audit write — idempotent upsert with a deterministic id (ADR-0005
-      // Decision 5, CLAUDE.md §2.8); error surfaced, not swallowed (§2.7).
-      // tenant_id and actor_id are required NOT NULL columns (0002 migration).
-      const { error: auditErr } = await supabase.from('audit_log').upsert(
-        {
-          id: uuidv5(`rate_rule.reactivate:${rule.id}:${now}`, PS_UUID_NS),
-          tenant_id: tenantId,
-          actor_id: actorId,
-          action: 'rate_rule.reactivate',
-          entity: 'rate_rule',
-          entity_id: rule.id,
-          amount: null,
-          meta: { before: { is_active: false }, after: { is_active: true } },
-          created_at: now,
-        },
-        { onConflict: 'id' },
-      );
-      if (auditErr) throw auditErr;
+      // Audit write removed: migration 0012 audit_config_change trigger handles this atomically on the rate_rules INSERT/UPDATE (ADR-0011 §Q3).
 
       setRules((prev) =>
         prev.map((r) => (r.id === rule.id ? { ...r, is_active: true } : r)),
@@ -527,9 +491,11 @@ function ModalOverlay({
       <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
 
       {/* Panel — design-system elevation e3 */}
+      {/* role="presentation" marks this as a layout-only container; stops click propagation to the scrim. */}
       <div
         className="relative z-10 w-full max-w-lg bg-surface rounded-lg border border-border shadow-e3 p-xl max-h-[90dvh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
+        role="presentation"
       >
         {/* Close button — aria-label from i18n (RTL/i18n check) */}
         <button

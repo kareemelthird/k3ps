@@ -23,8 +23,6 @@ import {
   egpToPiastres,
   piastresToEgp,
   uuidv4,
-  uuidv5,
-  PS_UUID_NS,
 } from '@ps/core';
 import type { Product } from '@ps/core';
 import { Button } from '@/components/ui/Button';
@@ -237,53 +235,9 @@ export function ProductForm({ initial, onSuccess, onCancel }: ProductFormProps) 
 
       if (error) throw error;
 
-      // Write audit_log row (ADR-0006 Decision 7; action taxonomy locked)
-      // action: 'product.create' on insert, 'product.update' on edit.
-      // amount: null (catalog config change, not a money transaction per ADR-0006).
-      const action = initial == null ? 'product.create' : 'product.update';
-      const auditMeta =
-        initial == null
-          ? { snapshot: { name: row.name, category: row.category, price: row.price, cost: row.cost, stock: row.stock } }
-          : {
-              before: {
-                name: initial.name,
-                category: initial.category,
-                price: initial.price,
-                cost: initial.cost,
-                stock: initial.stock,
-                is_active: initial.is_active,
-              },
-              after: {
-                name: row.name,
-                category: row.category,
-                price: row.price,
-                cost: row.cost,
-                stock: row.stock,
-                is_active: row.is_active,
-              },
-            };
-
-      // Audit write is an IDEMPOTENT upsert (ADR-0006 Decision 7, CLAUDE.md §2.8).
-      // The id is deterministic from the operation's identity (action:productId:instant)
-      // so a double-fire of the same save upserts the same row instead of duplicating.
-      // The error is surfaced (not swallowed): a missing audit row on a money-config
-      // change must be visible (CLAUDE.md §2.7).
-      // tenant_id and actor_id are required NOT NULL columns (0002 migration).
-      const { error: auditErr } = await supabase.from('audit_log').upsert(
-        {
-          id: uuidv5(`${action}:${id}:${now}`, PS_UUID_NS),
-          tenant_id: tenantId,
-          actor_id: actorId,
-          action,
-          entity: 'product',
-          entity_id: id,
-          amount: null,
-          meta: auditMeta,
-          created_at: now,
-        },
-        { onConflict: 'id' },
-      );
-      if (auditErr) throw auditErr;
+      // Audit write removed: migration 0011 adds an AFTER INSERT OR UPDATE trigger
+      // (audit_config_change) on products that writes the audit_log row atomically
+      // in the same statement — stronger than a separate client insert (ADR-0011 §Q3).
 
       onSuccess(data as Product);
     } catch (err) {
@@ -351,10 +305,10 @@ export function ProductForm({ initial, onSuccess, onCancel }: ProductFormProps) 
       <div className="flex flex-col gap-xs">
         <div className="flex items-center gap-sm">
           <button
+            id="stock-tracking-toggle"
             type="button"
             role="switch"
             aria-checked={form.stock_tracked}
-            aria-label={t('products.field.stockTracking')}
             onClick={() => set('stock_tracked', !form.stock_tracked)}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
               ${form.stock_tracked ? 'bg-primary' : 'bg-surface-3 border border-border'}`}
@@ -365,9 +319,11 @@ export function ProductForm({ initial, onSuccess, onCancel }: ProductFormProps) 
               aria-hidden="true"
             />
           </button>
+          {/* htmlFor associates the label with the button; clicking the label
+              activates the button (clicking label focuses+activates the button). */}
           <label
+            htmlFor="stock-tracking-toggle"
             className="text-label font-medium text-text-muted cursor-pointer select-none"
-            onClick={() => set('stock_tracked', !form.stock_tracked)}
           >
             {t('products.field.stockTracking')}
           </label>
