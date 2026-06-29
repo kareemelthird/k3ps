@@ -42,6 +42,7 @@ These items were explicitly deferred from the 10-phase roadmap and require a new
 - **`stripe_events` retention policy** — the dedupe table grows without bound; a TTL policy or archival job is needed.
 - **GDPR data export on cancel** — no self-service data export.
 - **Cross-tenant audit page pagination** — the super-admin audit view (`/admin/audit`) hard-caps at `LIMIT 500` with no date filter or pagination; tenants exceeding 500 events cannot see the full log. Needs a paged/filtered read.
+- **Server-side money recompute in `close_session_tx`** — the close path currently persists client-computed `time_total` / `orders_total` / `grand_total` (the long-standing trust model). The strongest hardening (recommended by the deep money audit and security review) is to have `close_session_tx` recompute `orders_total` from the session's non-void `order_items` inside the transaction and assert `grand_total = time_total + orders_total − discount` server-side, so a future client bug can never misreport money. `time_total` would remain client-computed (the pricing engine isn't in SQL). Needs an ADR + migration + pgTAP.
 - **OS background-terminated sync** — the mobile outbox drains on next launch/foreground/reconnect; background delivery while the app is terminated is not implemented.
 
 ---
