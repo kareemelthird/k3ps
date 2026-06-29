@@ -719,7 +719,11 @@
         "search": "ابحث باسم العميل",
         "allStatuses": "كل الحالات",
         "allPlans": "كل الخطط",
-        "clear": "مسح الفلاتر"
+        "clear": "مسح الفلاتر",
+        "statusTrialing": "تجريبي",
+        "statusActive": "نشط",
+        "statusPastDue": "متعثّر",
+        "statusCanceled": "مُلغى"
       },
       "col": {
         "tenant": "العميل",

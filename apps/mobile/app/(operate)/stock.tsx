@@ -254,7 +254,7 @@ export default function StockScreen() {
     setRestockError(null);
     const qty = parseInt(restockQty, 10);
     if (isNaN(qty) || qty <= 0) {
-      setRestockError(t('stock.restock.qty'));
+      setRestockError(t('stock.error.qtyRequired'));
       return;
     }
     try {
@@ -280,11 +280,11 @@ export default function StockScreen() {
     setAdjustError(null);
     const delta = parseInt(adjustDelta, 10);
     if (isNaN(delta)) {
-      setAdjustError(t('stock.adjust.delta'));
+      setAdjustError(t('stock.error.deltaRequired'));
       return;
     }
     if (!adjustNote.trim()) {
-      setAdjustError(t('stock.adjust.note'));
+      setAdjustError(t('stock.error.noteRequired'));
       return;
     }
     try {

@@ -339,7 +339,7 @@ export function ProductsView({ isOwner }: ProductsViewProps) {
         .eq('id', product.id);
       if (err) throw err;
 
-      // Audit write removed: migration 0011 audit_config_change trigger handles
+      // Audit write removed: migration 0012 audit_config_change trigger handles
       // this atomically on the products UPDATE (ADR-0011 §Q3).
 
       setProducts((prev) =>
@@ -369,7 +369,7 @@ export function ProductsView({ isOwner }: ProductsViewProps) {
         .eq('id', product.id);
       if (err) throw err;
 
-      // Audit write removed: migration 0011 audit_config_change trigger handles
+      // Audit write removed: migration 0012 audit_config_change trigger handles
       // this atomically on the products UPDATE (ADR-0011 §Q3).
 
       setProducts((prev) =>

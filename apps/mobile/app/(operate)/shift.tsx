@@ -362,7 +362,7 @@ export default function ShiftScreen() {
 
     const egp = parseFloat(openingCashEgp.replace(',', '.'));
     if (isNaN(egp) || egp < 0) {
-      setOpenError(t('shift.open.openingCash'));
+      setOpenError(t('shift.error.openingCashRequired'));
       return;
     }
     const openingCash = egpToPiastres(egp);

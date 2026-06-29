@@ -113,10 +113,12 @@ export function SyncCenterSheet({ visible, onClose }: SyncCenterSheetProps) {
         <View style={styles.lastSynced}>
           <AppText role="caption" color={colors.textFaint}>
             {t('sync.center.lastSynced', {
-              time: new Date(store.lastSyncedAt).toLocaleTimeString('ar-EG', {
-                hour: '2-digit',
-                minute: '2-digit',
-              }),
+              time: toArabicDigits(
+                new Date(store.lastSyncedAt).toLocaleTimeString('ar-EG', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                }),
+              ),
             })}
           </AppText>
         </View>

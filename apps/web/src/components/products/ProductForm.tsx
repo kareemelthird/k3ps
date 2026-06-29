@@ -235,7 +235,7 @@ export function ProductForm({ initial, onSuccess, onCancel }: ProductFormProps) 
 
       if (error) throw error;
 
-      // Audit write removed: migration 0011 adds an AFTER INSERT OR UPDATE trigger
+      // Audit write removed: migration 0012 adds an AFTER INSERT OR UPDATE trigger
       // (audit_config_change) on products that writes the audit_log row atomically
       // in the same statement — stronger than a separate client insert (ADR-0011 §Q3).
 

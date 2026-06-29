@@ -245,8 +245,8 @@ const ctrStyles = StyleSheet.create({
 //
 // Allows adding catalog products to the ACTIVE session (not a walk-in).
 // Wires useSessionOrders + useAddOrder (sessionId = this session) + useVoidOrderItem.
-// Calls _syncSessionOrdersTotal after each add/void so sessions.orders_total
-// stays in sync and is included in the live grand_total.
+// sessions.orders_total is NOT synced mid-session; the live grand_total in the
+// main screen reads liveOrdersTotal from the shared useSessionOrders cache entry.
 
 interface SessionOrdersSlotProps {
   sessionId: string;
@@ -671,6 +671,12 @@ export default function SessionDetailScreen() {
 
   const { data: rateRules = [] } = useRateRules(tenantId);
 
+  // B3 fix: fetch live orders total so the on-screen grand total (prepaid/fixed_match)
+  // includes orders. TanStack Query shares the same cache entry as SessionOrdersSlot,
+  // so no extra network request is made when both components are mounted.
+  const { data: liveOrdersData } = useSessionOrders(id, tenantId);
+  const liveOrdersTotal = liveOrdersData?.ordersTotal ?? 0;
+
   // Fetch the device row so we know device_type for planSegments resolution.
   // SHOULD-FIX 4: we must NOT coerce a missing device_type to 'any' (a billing
   // wildcard). Actions that call planSegments/resolveRule are disabled until
@@ -734,13 +740,11 @@ export default function SessionDetailScreen() {
       liveTotalPiastres = grandTotal;
       liveSegmentPlans = segmentPlans;
     } else if (billingMode === 'prepaid') {
-      // SHOULD-FIX 6: wrap in computeGrandTotal so live total includes
-      // orders_total + discount, matching the close math exactly.
       liveTotalPiastres = computeGrandTotal({
         time_total: computePrepaidCost({
           prepaid_total: session.prepaid_total ?? null,
         }),
-        orders_total: session.orders_total ?? 0,
+        orders_total: liveOrdersTotal,
         discount: session.discount ?? 0,
       });
     } else if (billingMode === 'fixed_match') {
@@ -750,7 +754,7 @@ export default function SessionDetailScreen() {
           fixed_match_price: firstSeg?.price_per_hour_snapshot ?? 0,
           match_count: session.match_count ?? 0,
         }),
-        orders_total: session.orders_total ?? 0,
+        orders_total: liveOrdersTotal,
         discount: session.discount ?? 0,
       });
     }

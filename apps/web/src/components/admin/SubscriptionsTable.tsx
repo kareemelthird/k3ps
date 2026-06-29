@@ -69,6 +69,7 @@ export function SubscriptionsTable({
   onRetry,
 }: SubscriptionsTableProps) {
   const t = useTranslations('admin.subs');
+  const tAction = useTranslations('action');
 
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -113,10 +114,10 @@ export function SubscriptionsTable({
           className="rounded-sm border border-border bg-surface-3 text-text px-sm py-xs text-body h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <option value="all">{t('filter.allStatuses')}</option>
-          <option value="trialing">تجريبي</option>
-          <option value="active">نشط</option>
-          <option value="past_due">متعثّر</option>
-          <option value="canceled">مُلغى</option>
+          <option value="trialing">{t('filter.statusTrialing')}</option>
+          <option value="active">{t('filter.statusActive')}</option>
+          <option value="past_due">{t('filter.statusPastDue')}</option>
+          <option value="canceled">{t('filter.statusCanceled')}</option>
         </select>
 
         {/* Plan filter */}
@@ -152,7 +153,7 @@ export function SubscriptionsTable({
             onClick={onRetry}
             className="text-label text-danger underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-xs"
           >
-            إعادة المحاولة
+            {tAction('retry')}
           </button>
         </div>
       )}

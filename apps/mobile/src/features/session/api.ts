@@ -27,6 +27,7 @@ import {
   aggregateOpenMeter,
   computeFixedMatchCost,
   computeGrandTotal,
+  computeOrdersTotalForSession,
   computePrepaidCost,
   isTracked,
   nowIso,
@@ -466,28 +467,41 @@ export function useCloseSessionPhase4() {
         });
       }
 
-      const grandTotal = computeGrandTotal({
-        time_total: timeTotalPiastres,
-        orders_total: input.session.orders_total ?? 0,
-        discount: input.session.discount ?? 0,
-      });
-
-      // Phase 8: build stock movement rows (reads stay; these feed the RPC payload).
-      // IMPORTANT: both reads must succeed — if either fails (offline / transient)
-      // we throw so the mutation retries when online. Silently continuing with
-      // data=null would enqueue p_movements:[] and permanently drop tracked-product
-      // sale stock from the ledger. (BLOCKER 3 / Phase 8 review.)
+      // B3 fix: fetch orders BEFORE computeGrandTotal so orders_total is derived
+      // from actual line-item snapshots rather than the stale sessions.orders_total
+      // column (which is never updated after order add). unit_price added to the
+      // select so computeOrdersTotalForSession can sum correctly. This single fetch
+      // is reused for both the orders_total sum AND the stock movement build below —
+      // no second round-trip. IMPORTANT: if the fetch fails we throw so the
+      // mutation retries; silently continuing would enqueue a wrong grand_total.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let movementRows: any[] = [];
 
       const { data: sessionOrders, error: ordersReadErr } = await supabase
         .from('orders')
-        .select('id, status, order_items(id, product_id, qty, is_void)')
+        .select('id, status, order_items(id, product_id, qty, unit_price, is_void)')
         .eq('session_id', input.sessionId)
         .eq('tenant_id', input.tenantId)
         .neq('status', 'void');
 
       if (ordersReadErr) throw ordersReadErr;
+
+      const ordersTotal = computeOrdersTotalForSession(
+        (sessionOrders ?? []).map((o) => ({
+          status: o.status as 'open' | 'paid' | 'void',
+          lines: (o.order_items ?? []).map((i: { qty: number; unit_price: number; is_void: boolean }) => ({
+            qty: i.qty,
+            unit_price: i.unit_price,
+            is_void: i.is_void,
+          })),
+        })),
+      );
+
+      const grandTotal = computeGrandTotal({
+        time_total: timeTotalPiastres,
+        orders_total: ordersTotal,
+        discount: input.session.discount ?? 0,
+      });
 
       if (sessionOrders && sessionOrders.length > 0) {
         const productIds = new Set<string>();

@@ -24,6 +24,7 @@ import {
 } from '@ps/core';
 import type { RateRule, BillingMode } from '@ps/core';
 import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { RateRuleForm } from './RateRuleForm';
@@ -284,54 +285,60 @@ export function RateRulesView({ isOwner }: RateRulesViewProps) {
         <RateRulePreview rules={rules} />
       )}
 
-      {/* Modal overlay */}
-      {modal && (
-        <ModalOverlay onClose={() => setModal(null)}>
-          {modal.type === 'create' && (
-            <div className="space-y-lg">
-              <h2 className="text-h2 text-text">{t('rateRules.create')}</h2>
-              <RateRuleForm
-                onSuccess={handleSaved}
-                onCancel={() => setModal(null)}
-              />
-            </div>
-          )}
-
-          {modal.type === 'edit' && (
-            <div className="space-y-lg">
-              <h2 className="text-h2 text-text">{t('rateRules.edit')}</h2>
-              <RateRuleForm
-                initial={modal.rule}
-                onSuccess={handleSaved}
-                onCancel={() => setModal(null)}
-              />
-            </div>
-          )}
-
-          {modal.type === 'deactivate' && (
-            <ConfirmDialog
-              message={t('rateRules.action.deactivateConfirm')}
-              confirmLabel={t('rateRules.action.deactivate')}
-              confirmVariant="danger"
-              loading={pendingId === modal.rule.id}
-              onConfirm={() => void handleDeactivate(modal.rule)}
+      {/* Accessible dialog — focus trap, focus return, Escape key (ADR-0011 §Q5) */}
+      {modal && modal.type === 'create' && (
+        <Dialog labelledBy="rate-rules-dialog-title" onClose={() => setModal(null)}>
+          <div className="space-y-lg">
+            <h2 id="rate-rules-dialog-title" className="text-h2 text-text">
+              {t('rateRules.create')}
+            </h2>
+            <RateRuleForm
+              onSuccess={handleSaved}
               onCancel={() => setModal(null)}
-              t={t}
             />
-          )}
+          </div>
+        </Dialog>
+      )}
 
-          {modal.type === 'reactivate' && (
-            <ConfirmDialog
-              message={t('rateRules.action.reactivateConfirm')}
-              confirmLabel={t('rateRules.action.reactivate')}
-              confirmVariant="primary"
-              loading={pendingId === modal.rule.id}
-              onConfirm={() => void handleReactivate(modal.rule)}
+      {modal && modal.type === 'edit' && (
+        <Dialog labelledBy="rate-rules-dialog-title" onClose={() => setModal(null)}>
+          <div className="space-y-lg">
+            <h2 id="rate-rules-dialog-title" className="text-h2 text-text">
+              {t('rateRules.edit')}
+            </h2>
+            <RateRuleForm
+              initial={modal.rule}
+              onSuccess={handleSaved}
               onCancel={() => setModal(null)}
-              t={t}
             />
-          )}
-        </ModalOverlay>
+          </div>
+        </Dialog>
+      )}
+
+      {modal && modal.type === 'deactivate' && (
+        <Dialog ariaLabel={t('rateRules.action.deactivate')} onClose={() => setModal(null)}>
+          <ConfirmDialog
+            message={t('rateRules.action.deactivateConfirm')}
+            confirmLabel={t('rateRules.action.deactivate')}
+            confirmVariant="danger"
+            loading={pendingId === modal.rule.id}
+            onConfirm={() => void handleDeactivate(modal.rule)}
+            onCancel={() => setModal(null)}
+          />
+        </Dialog>
+      )}
+
+      {modal && modal.type === 'reactivate' && (
+        <Dialog ariaLabel={t('rateRules.action.reactivate')} onClose={() => setModal(null)}>
+          <ConfirmDialog
+            message={t('rateRules.action.reactivateConfirm')}
+            confirmLabel={t('rateRules.action.reactivate')}
+            confirmVariant="primary"
+            loading={pendingId === modal.rule.id}
+            onConfirm={() => void handleReactivate(modal.rule)}
+            onCancel={() => setModal(null)}
+          />
+        </Dialog>
       )}
     </div>
   );
@@ -469,52 +476,6 @@ function RateRuleCard({
   );
 }
 
-// ─── Modal overlay (simple — design-system §5 motion tokens) ─────────────────
-
-function ModalOverlay({
-  children,
-  onClose,
-}: {
-  children: React.ReactNode;
-  onClose: () => void;
-}) {
-  const t = useTranslations();
-  return (
-    // Scrim (design-system §2.2: rgba(0,0,0,0.6))
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-md"
-      style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
-      role="dialog"
-      aria-modal="true"
-    >
-      {/* Backdrop close */}
-      <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
-
-      {/* Panel — design-system elevation e3 */}
-      {/* role="presentation" marks this as a layout-only container; stops click propagation to the scrim. */}
-      <div
-        className="relative z-10 w-full max-w-lg bg-surface rounded-lg border border-border shadow-e3 p-xl max-h-[90dvh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-        role="presentation"
-      >
-        {/* Close button — aria-label from i18n (RTL/i18n check) */}
-        <button
-          onClick={onClose}
-          aria-label={t('action.close')}
-          className="absolute top-md end-md text-text-muted hover:text-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-xs p-xs"
-        >
-          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-
-        {children}
-      </div>
-    </div>
-  );
-}
-
 // ─── Confirm dialog ───────────────────────────────────────────────────────────
 
 interface ConfirmDialogProps {
@@ -524,7 +485,6 @@ interface ConfirmDialogProps {
   loading: boolean;
   onConfirm: () => void;
   onCancel: () => void;
-  t: ReturnType<typeof useTranslations>;
 }
 
 function ConfirmDialog({
@@ -534,8 +494,8 @@ function ConfirmDialog({
   loading,
   onConfirm,
   onCancel,
-  t,
 }: ConfirmDialogProps) {
+  const t = useTranslations();
   return (
     <div className="space-y-lg">
       <p className="text-body text-text">{message}</p>

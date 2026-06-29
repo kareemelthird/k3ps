@@ -270,7 +270,9 @@ export function useAddOrder() {
       const total = computeOrderTotal(lineInputs);
 
       // Phase 8: enqueue via outbox. Order first; items depend on order so they
-      // never orphan-apply. _syncSessionOrdersTotal removed — realtime updates it.
+      // never orphan-apply. sessions.orders_total is computed fresh at close time
+      // by computeOrdersTotalForSession in session/api.ts useCloseSessionPhase4 —
+      // no column sync needed here.
       await persistRow({
         localId: orderId,
         tenantId: input.tenantId,
@@ -635,47 +637,6 @@ export function usePayWalkInOrder() {
   });
 }
 
-// ─── Internal helper: sync session.orders_total ───────────────────────────────
-
-/**
- * Re-queries all non-void orders+items for a session and updates
- * sessions.orders_total. Called after any order add/void.
- *
- * This is a direct DB update (no optimistic cache for this derived field) to
- * keep it authoritative. The session detail query re-fetches on `onSettled`.
- */
-async function _syncSessionOrdersTotal(
-  sessionId: string,
-  tenantId: string,
-): Promise<void> {
-  const { data: ordersData, error } = await supabase
-    .from('orders')
-    .select('status, order_items(qty, unit_price, is_void)')
-    .eq('session_id', sessionId)
-    .eq('tenant_id', tenantId)
-    .neq('status', 'void');
-
-  if (error) throw error;
-
-  const ordersTotal = computeOrdersTotalForSession(
-    (ordersData ?? []).map((o) => ({
-      status: o.status as 'open' | 'paid' | 'void',
-      lines: (o.order_items ?? []).map((i: { qty: number; unit_price: number; is_void: boolean }) => ({
-        qty: i.qty,
-        unit_price: i.unit_price,
-        is_void: i.is_void,
-      })),
-    })),
-  );
-
-  const { error: updateErr } = await supabase
-    .from('sessions')
-    .update({ orders_total: ordersTotal, updated_at: nowIso() })
-    .eq('id', sessionId)
-    .eq('tenant_id', tenantId);
-
-  if (updateErr) throw updateErr;
-}
 
 /** Exported for use in the session close path (writes sale movements at close). */
 export async function writeSessionSaleMovements(params: {
