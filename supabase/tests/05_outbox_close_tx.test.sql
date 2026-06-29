@@ -44,7 +44,7 @@
 --   Audit log row:     aaaaaaaa-a091-4000-8000-000000009009
 --   Fixture session B: bbbbbbbb-5e09-4000-8000-000000000009
 --
--- Plan: 15 tests.
+-- Plan: 19 tests (16 original + 3 added by migration 0013: BLOCK E).
 -- Depends on seed.sql (Tenant A = aaaaaaaa…, Tenant B = bbbbbbbb…; devices,
 -- products, branches, and profiles already seeded).
 -- All fixture writes are inside this transaction and rolled back at the end.
@@ -52,7 +52,7 @@
 -- =============================================================================
 
 begin;
-select plan(16);
+select plan(19);
 
 -- ---------------------------------------------------------------------------
 -- FIXTURE SETUP (as superuser — before switching to the authenticated role)
@@ -510,6 +510,178 @@ select is(
    where id = 'bbbbbbbb-5e09-4000-8000-000000000009'),
   'active'::public.session_status,
   'close_session_tx: cross-tenant call had zero effect — B''s session still active');
+
+-- ===========================================================================
+-- BLOCK E — orders_total persistence (migration 0013, tests 16–18)
+--
+-- Proves that close_session_tx now writes orders_total from the patch into
+-- sessions.orders_total (previously always 0), and that the dashboard
+-- reconciliation invariant grand_total = time_total + orders_total − discount
+-- holds after a close with F&B orders.
+--
+-- Fixture: a second active session on Device A-2 (aaaaaaaa-de01-…-0002),
+-- with one paid order containing 3 × Pepsi Can (500 p each) = 1500 p total.
+-- The patch sends time_total=6000, orders_total=1500, grand_total=7500,
+-- discount=0 — so both the component column and the invariant are verifiable.
+--
+-- UUIDs (BLOCK E — all valid RFC-4122 hex; no mnemonic letters beyond a–f):
+--   Session E:       aaaaaaaa-5e09-4000-8000-000000000099
+--   Segment E:       aaaaaaaa-5e09-4000-8000-000000000199
+--   Order E:         aaaaaaaa-0d0e-4000-8000-000000000001
+--   Order item E:    aaaaaaaa-01e1-4000-8000-000000000001
+--   Audit log E:     aaaaaaaa-a091-4000-8000-000000000199
+-- ===========================================================================
+
+-- ── BLOCK E fixture setup (as superuser — before switching role) ─────────────
+
+-- Second active session on Device A-2 (free throughout; Device A-1 was freed
+-- by the close in BLOCK A so could also be reused, but using Device A-2 keeps
+-- the fixtures orthogonal).
+insert into public.sessions
+  (id, tenant_id, branch_id, device_id, manager_id,
+   billing_mode, status, started_at,
+   time_total, orders_total, grand_total, discount)
+values
+  ('aaaaaaaa-5e09-4000-8000-000000000099',
+   'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
+   'aaaaaaaa-de01-4000-8000-000000000002',   -- Device A-2
+   '00000000-0000-4000-8000-000000000002',   -- Manager Alpha
+   'open', 'active',
+   '2026-06-26T09:00:00+00:00'::timestamptz,
+   0, 0, 0, 0)
+on conflict (id) do nothing;
+
+-- Open segment for Session E (to be closed by the RPC).
+insert into public.session_segments
+  (id, tenant_id, session_id, play_mode, price_per_hour_snapshot,
+   started_at, ended_at)
+values
+  ('aaaaaaaa-5e09-4000-8000-000000000199',
+   'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'aaaaaaaa-5e09-4000-8000-000000000099',
+   'single', 6000,
+   '2026-06-26T09:00:00+00:00'::timestamptz, null)
+on conflict (id) do nothing;
+
+-- A paid order attached to Session E: 3 × Pepsi Can @ 500 p = 1500 p.
+-- Status 'paid' (non-void) — these are the "non-void order lines" whose sum
+-- the mobile client passes as orders_total in the close patch.
+insert into public.orders
+  (id, tenant_id, branch_id, session_id, manager_id, total, status)
+values
+  ('aaaaaaaa-0d0e-4000-8000-000000000001',
+   'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
+   'aaaaaaaa-5e09-4000-8000-000000000099',
+   '00000000-0000-4000-8000-000000000002',
+   1500, 'paid'::public.order_status)
+on conflict (id) do nothing;
+
+insert into public.order_items
+  (id, tenant_id, order_id, product_id, qty, unit_price)
+values
+  ('aaaaaaaa-01e1-4000-8000-000000000001',
+   'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'aaaaaaaa-0d0e-4000-8000-000000000001',
+   'aaaaaaaa-c0de-4000-8000-000000000001',   -- Pepsi Can (500 p each, tracked)
+   3, 500)
+on conflict (id) do nothing;
+
+-- ── Re-establish Manager Alpha JWT ───────────────────────────────────────────
+
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub',  '00000000-0000-4000-8000-000000000002',
+    'role', 'authenticated',
+    'app_metadata', json_build_object(
+      'tenant_id',      'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+      'roles',          'manager',
+      'is_super_admin', false
+    )
+  )::text,
+  true
+);
+set local role authenticated;
+
+-- Test 16 — close_session_tx with orders_total in patch succeeds.
+-- The patch includes "orders_total": 1500 (sum of the 3 Pepsi Can items).
+-- time_total = 6000 (1 h at 6000 p/h), grand_total = 7500, discount = 0.
+-- No stock movements passed (p_movements = '[]') to keep the fixture minimal;
+-- the test focus is orders_total persistence, not the movement path.
+select lives_ok(
+  $$ select public.close_session_tx(
+    'aaaaaaaa-5e09-4000-8000-000000000099'::uuid,   -- p_session_id
+    'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa'::uuid,   -- p_tenant_id
+    'aaaa0001-0000-4000-8000-aaaaaaaaaaaa'::uuid,   -- p_branch_id
+    '00000000-0000-4000-8000-000000000002'::uuid,   -- p_actor_id
+    -- p_session_patch: includes orders_total (the field added by migration 0013)
+    '{
+      "status":         "closed",
+      "ended_at":       "2026-06-26T10:00:00+00:00",
+      "time_total":     6000,
+      "orders_total":   1500,
+      "grand_total":    7500,
+      "payment_method": "cash",
+      "shift_id":       null,
+      "updated_at":     "2026-06-26T10:00:00+00:00"
+    }'::jsonb,
+    -- p_segments: one segment closed at 10:00
+    '[{
+      "id":                      "aaaaaaaa-5e09-4000-8000-000000000199",
+      "tenant_id":               "aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa",
+      "session_id":              "aaaaaaaa-5e09-4000-8000-000000000099",
+      "play_mode":               "single",
+      "rate_rule_id":            null,
+      "price_per_hour_snapshot": 6000,
+      "started_at":              "2026-06-26T09:00:00+00:00",
+      "ended_at":                "2026-06-26T10:00:00+00:00",
+      "updated_at":              "2026-06-26T10:00:00+00:00"
+    }]'::jsonb,
+    '[]'::jsonb,                                    -- p_movements: none (focus is orders_total)
+    'aaaaaaaa-de01-4000-8000-000000000002'::uuid,   -- p_device_id (Device A-2)
+    -- p_audit: deterministic id for this session close
+    '{
+      "id":        "aaaaaaaa-a091-4000-8000-000000000199",
+      "tenant_id": "aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa",
+      "branch_id": "aaaa0001-0000-4000-8000-aaaaaaaaaaaa",
+      "actor_id":  "00000000-0000-4000-8000-000000000002",
+      "action":    "session.close",
+      "entity":    "sessions",
+      "entity_id": "aaaaaaaa-5e09-4000-8000-000000000099",
+      "amount":    7500,
+      "meta":      {"billing_mode":"open","time_total":6000,"orders_total":1500},
+      "created_at":"2026-06-26T10:00:00+00:00"
+    }'::jsonb
+  ) $$,
+  'close_session_tx (0013): call with orders_total in patch succeeds');
+
+-- Reset to superuser for the verification queries below.
+reset role;
+
+-- Test 17 — sessions.orders_total is now 1500 (no longer the dead initial 0).
+-- This is the direct proof that migration 0013 fixed the dead column: the value
+-- from the patch was persisted into the sessions row.
+select is(
+  (select orders_total::bigint
+   from public.sessions
+   where id = 'aaaaaaaa-5e09-4000-8000-000000000099'),
+  1500::bigint,
+  'close_session_tx (0013): orders_total = sum of non-void order lines (1500 p) after close');
+
+-- Test 18 — grand_total = time_total + orders_total − discount (invariant).
+-- Rather than hard-coding 7500, we compute the RHS from the row itself so the
+-- test validates the structural relationship, not just the literal value.
+-- grand_total(7500) = time_total(6000) + orders_total(1500) − discount(0).
+select is(
+  (select grand_total::bigint
+   from public.sessions
+   where id = 'aaaaaaaa-5e09-4000-8000-000000000099'),
+  (select (time_total + orders_total - discount)::bigint
+   from public.sessions
+   where id = 'aaaaaaaa-5e09-4000-8000-000000000099'),
+  'close_session_tx (0013): grand_total = time_total + orders_total - discount (invariant)');
 
 -- ===========================================================================
 

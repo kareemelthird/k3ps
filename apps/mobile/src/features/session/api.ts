@@ -175,6 +175,7 @@ export function computeLiveOpenMeterWithType(
   rateRules: RateRule[],
   deviceType: string,
   atIso: string,
+  ordersTotal: number,
 ): { timeCost: number; grandTotal: number; segmentPlans: SegmentPlan[] } {
   const closedSegs = segments.filter((s) => s.ended_at !== null);
   const openSeg = segments.find((s) => s.ended_at === null);
@@ -208,7 +209,7 @@ export function computeLiveOpenMeterWithType(
   const { total: timeCost } = aggregateOpenMeter(allInputs, mods);
   const grandTotal = computeGrandTotal({
     time_total: timeCost,
-    orders_total: session.orders_total ?? 0,
+    orders_total: ordersTotal,
     discount: session.discount ?? 0,
   });
 
@@ -567,6 +568,7 @@ export function useCloseSessionPhase4() {
             status: 'closed',
             ended_at: endedAt,
             time_total: timeTotalPiastres,
+            orders_total: ordersTotal,
             grand_total: grandTotal,
             payment_method: input.paymentMethod ?? null,
             shift_id: input.shiftId ?? null,

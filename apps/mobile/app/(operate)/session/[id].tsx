@@ -735,6 +735,7 @@ export default function SessionDetailScreen() {
             rateRules,
             deviceType,
             atIso,
+            liveOrdersTotal,
           )
         : { grandTotal: 0, segmentPlans: [] };
       liveTotalPiastres = grandTotal;
