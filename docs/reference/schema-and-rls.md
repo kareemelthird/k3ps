@@ -79,10 +79,13 @@ create policy "sessions_super_admin_read" on public.sessions
 | `0006_orders_inventory_shifts.sql` | `order_items.is_void`/`voided_at`, `shifts_one_open_per_branch` index |
 | `0007_reporting_functions.sql` | `SECURITY INVOKER` reporting RPCs; `businessDayKey`-aligned bucketing |
 | `0008_super_admin_and_impersonation.sql` | Super-admin cross-tenant read policies; `stamp_impersonator()` BEFORE INSERT trigger on `audit_log`; impersonation RPCs |
-| `0009_outbox_realtime_and_close_rpc.sql` | `close_session_tx` SECURITY INVOKER RPC; Realtime publication setup |
+| `0009_outbox_realtime_and_close_rpc.sql` | `close_session_tx` RPC (originally SECURITY INVOKER; became SECURITY DEFINER from Phase 8 onward — see migration `0009` + ADR-0009 lesson below); Realtime publication setup |
 | `0010_billing.sql` | `plans`, `subscriptions`, `stripe_events`; billing SECURITY DEFINER RPCs (service-role-only); seeded catalog; trial backfill |
 | `0011_cap_reactivation_fix.sql` | Billing cap reactivation edge-case fix |
 | `0012_audit_atomicity_and_perf_indexes.sql` | `audit_config_change()` SECURITY INVOKER trigger; `audit_log_entity_idx` |
+| `0013_persist_session_orders_total.sql` | `close_session_tx` updated to persist `orders_total` from close patch into `sessions` row |
+| `0014_close_session_tx_pin_payload_tenant.sql` | Security fix: per-row payload tenant-pin guards on all three INSERT payloads inside `close_session_tx`; corrects cross-phase SECURITY DEFINER regression |
+| `0015_session_segments_upsert_tenant_guard.sql` | Defense-in-depth: adds `WHERE session_segments.tenant_id = p_tenant_id` to the ON CONFLICT DO UPDATE clause so a cross-tenant id collision is a no-op rather than a billing-snapshot field overwrite |
 
 > **Numbering note:** ADR-0011 originally planned `0011_audit_atomicity_and_perf_indexes.sql` but `0011_cap_reactivation_fix.sql` was already applied; the audit trigger therefore landed in `0012`. The migration comment documents this.
 
@@ -96,7 +99,7 @@ Never resolve tenant identity from `profiles`, from `tenant_members` JOINs in po
 ### SECURITY DEFINER vs SECURITY INVOKER — the discipline (ADR-0007)
 - Helper fns (`current_tenant_id`, `is_active_member`, `is_tenant_owner`, `is_platform_admin`, `stamp_impersonator`) are **SECURITY DEFINER** because they need to read privilege-elevated tables (`profiles`, `tenant_members`) — not because the caller needs elevated data access.
 - **Reporting RPCs and the `product_stock_levels` view use `SECURITY INVOKER`** — the caller's own RLS applies. No `SECURITY DEFINER` on any path that returns tenant data.
-- **`close_session_tx` (ADR-0009) is `SECURITY INVOKER`** — it writes the session close + audit row in one atomic transaction under the caller's RLS. This is the reference pattern for atomic multi-row writes that must also write to `audit_log`.
+- **`close_session_tx` (ADR-0009) is `SECURITY DEFINER`** — it runs as `postgres` (BYPASSRLS) so that the nested `audit_log` INSERT is not blocked by the `is_tenant_staff()` WITH CHECK evaluated in a nested-invoker context. RLS does NOT apply to its writes; isolation is enforced instead by two explicit scalar guards (p_tenant_id = current_tenant_id(); is_active_member()) plus three per-row payload pin guards added in migration `0014` (see lesson below).
 
 ### The `audit_config_change()` trigger (Phase 10 — migration `0012`)
 Before Phase 10, `ProductForm.tsx` issued a separate client-side `audit_log` upsert after the product upsert — non-atomic and client-skippable, violating §2.7's intent. The fix is a `SECURITY INVOKER` `AFTER INSERT OR UPDATE` trigger on `products` and `rate_rules`:
@@ -111,8 +114,16 @@ Before Phase 10, `ProductForm.tsx` issued a separate client-side `audit_log` ups
 ### The `stamp_impersonator()` BEFORE INSERT trigger on `audit_log` (Phase 7)
 Fires before every `audit_log` insert. Reads `current_impersonator_id()` from the JWT claim (set during an impersonation session) and stamps `meta.impersonator_id`. A client-supplied `meta.impersonator_id` is stripped — it cannot be forged. This means **any** audit write, including the new trigger's write, automatically gets the impersonator stamp without extra code.
 
-### The `close_session_tx` SECURITY INVOKER + SECURITY DEFINER lesson (ADR-0009)
-`close_session_tx` was originally designed as `SECURITY DEFINER` to guarantee the audit row is written even if the caller lacks direct `audit_log` insert permission. During implementation it was discovered that nested `audit_log` inserts inside a SECURITY DEFINER function bypass RLS — the `audit_log_staff_insert` policy (`tenant_id = current_tenant_id()`) would not be evaluated. The fix: **`SECURITY INVOKER` throughout**, with an explicit `tenant_id`/`member` guard at the top of the function body. This is the canonical pattern: functions that must also write to `audit_log` must be `SECURITY INVOKER` + carry their own guard, not use `SECURITY DEFINER` as a shortcut.
+### The `close_session_tx` SECURITY DEFINER + explicit guard lesson (ADR-0009 + migration 0014)
+`close_session_tx` is **`SECURITY DEFINER`** (owner=postgres, BYPASSRLS). The original invoker design caused the nested `audit_log` INSERT to fail 42501: `is_tenant_staff()` inside the `audit_log_staff_insert` WITH CHECK evaluated `false` in the nested-invoker context (a direct manager INSERT of the same row passes the identical policy — proven by pgTAP probes). The DEFINER switch fixed that correctness bug.
+
+**The DEFINER cross-phase regression (migration 0014):** Under SECURITY DEFINER, RLS `WITH CHECK` does not apply to writes inside the function. The only tenant guard after Phase 8 was the scalar check `p_tenant_id = current_tenant_id()`. A malicious tenant-A member could call with `p_tenant_id=A` (passes scalar guard) but embed `tenant_id=B` in individual payload rows for the three INSERT paths (session_segments, stock_movements, audit_log) — silently writing into tenant B's tables.
+
+**The fix (migration 0014):** Three per-row payload pin guards are added immediately after the two scalar guards and before any INSERT. Each guard iterates every row in the respective JSONB payload via `jsonb_populate_recordset` / `jsonb_populate_record` and raises `42501` if any row's `tenant_id IS DISTINCT FROM p_tenant_id` (NULL-safe). This re-enforces exactly what the RLS `WITH CHECK` would have provided under SECURITY INVOKER. These guards run under the already-verified `p_tenant_id = current_tenant_id()`, so pinning to `p_tenant_id` == pinning to the caller's signed-claim tenant.
+
+**Defense-in-depth (migration 0015):** The `session_segments` primary key is a global UUID — not composite with `tenant_id`. Migration 0015 adds `WHERE session_segments.tenant_id = p_tenant_id` to the ON CONFLICT DO UPDATE clause. Combined with the 0014 pin guard, the upsert is now fully tenant-confined in both directions: incoming rows must carry `tenant_id = p_tenant_id` (pin guard rejects otherwise), and a DO UPDATE fires only when the conflicting row already belongs to the same tenant.
+
+**Current contract:** `close_session_tx` is SECURITY DEFINER, with isolation enforced by (1) scalar tenant guard, (2) active-member guard, (3) per-row payload pin guards on all three INSERT payloads, and (4) `WHERE tenant_id = p_tenant_id` on both UPDATEs and the session_segments DO UPDATE. Security-reviewer sign-off is required on any change to this function.
 
 ### `audit_log_entity_idx` (Phase 10 — migration `0012`)
 Forward-only index on `audit_log(tenant_id, entity, entity_id)`. Added after the Phase 10 perf audit confirmed the "history for this entity" read path (e.g., all audit rows for a specific product) is a hot path on the owner dashboard with no existing index.
@@ -127,7 +138,7 @@ Tests live in `supabase/tests/` and run in CI:
 | `02_orders_inventory_shifts.test.sql` | Order/stock/shift writes respect tenant isolation |
 | `03_report_rpc_isolation.test.sql` | Reporting RPCs return only the caller's tenant data |
 | `04_super_admin_impersonation.test.sql` | Super-admin cross-tenant read; impersonation paths |
-| `05_outbox_close_tx.test.sql` | `close_session_tx` is atomic and RLS-correct |
+| `05_outbox_close_tx.test.sql` | `close_session_tx` is atomic, idempotent, and tenant-isolated; BLOCK F proves per-row payload pin guards (migration 0014) |
 | `06_billing_isolation.test.sql` | Billing tables + entitlement RPCs respect tenant isolation |
 | `07_audit_atomicity.test.sql` | `audit_config_change()` trigger fires atomically and cannot cross tenants |
 

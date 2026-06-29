@@ -23,10 +23,18 @@
 --     updated_at or notes on a closed row) are not blocked — the guard is
 --     narrow and precise.
 --
---   BLOCK D — cross-tenant isolation (AC 16, 26):
+--   BLOCK D — cross-tenant isolation via scalar guard (AC 16, 26):
 --     Tests 14–15: Manager Alpha (Tenant A) calling close_session_tx with
---     Tenant-B data is rejected by RLS WITH CHECK (SQLSTATE 42501). Tenant
---     B's session remains 'active' — zero cross-tenant effect.
+--     p_tenant_id=B is rejected by the SCALAR tenant guard (SQLSTATE 42501).
+--     (Under SECURITY DEFINER RLS WITH CHECK does not apply; the scalar guard
+--     is the actual rejection point here because p_tenant_id=B ≠ claim=A.)
+--     Tenant B's session remains 'active' — zero cross-tenant effect.
+--
+--   BLOCK F — per-row payload exploit path (migration 0014) [AC 16, 26]:
+--     Tests 19–21: the REAL exploit — p_tenant_id=A (passes scalar guard) but
+--     a payload row carries tenant_id=B. Before migration 0014 this silently
+--     wrote a row into tenant B. After 0014 the per-row pin guards catch it
+--     and raise 42501 before any INSERT executes.
 --
 -- UUID conventions (ALL valid RFC-4122 hex — same legend as other test files):
 --   Tenant A:       aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa
@@ -44,7 +52,8 @@
 --   Audit log row:     aaaaaaaa-a091-4000-8000-000000009009
 --   Fixture session B: bbbbbbbb-5e09-4000-8000-000000000009
 --
--- Plan: 19 tests (16 original + 3 added by migration 0013: BLOCK E).
+-- Plan: 23 tests (16 original + 3 added by migration 0013: BLOCK E
+--       + 4 added by migrations 0014/0015: BLOCK F).
 -- Depends on seed.sql (Tenant A = aaaaaaaa…, Tenant B = bbbbbbbb…; devices,
 -- products, branches, and profiles already seeded).
 -- All fixture writes are inside this transaction and rolled back at the end.
@@ -52,7 +61,7 @@
 -- =============================================================================
 
 begin;
-select plan(19);
+select plan(23);
 
 -- ---------------------------------------------------------------------------
 -- FIXTURE SETUP (as superuser — before switching to the authenticated role)
@@ -403,15 +412,19 @@ select lives_ok(
   'terminal guard: UPDATE closed shift (status unchanged) does NOT raise');
 
 -- ===========================================================================
--- BLOCK D — Cross-tenant isolation (tests 14–15)
+-- BLOCK D — Cross-tenant isolation via scalar guard (tests 14–15)
 --
--- Manager Alpha (Tenant A) attempts to call close_session_tx with Tenant-B
--- data (p_tenant_id = B, segments/audit rows with tenant_id = B).
+-- Manager Alpha (Tenant A) attempts to call close_session_tx with
+-- p_tenant_id=B (and segments/audit rows with tenant_id=B).
 --
--- The segments INSERT tries WITH CHECK (tenant_id = current_tenant_id()):
---   tenant_id  = 'bbbbbbbb…' (B)
---   current_tenant_id() = 'aaaaaaaa…' (A)
---   B ≠ A → false → permission denied → SQLSTATE 42501 (AC 16).
+-- Under SECURITY DEFINER, RLS WITH CHECK does NOT apply inside the function.
+-- The rejection comes from the SCALAR guard (guard 0):
+--   p_tenant_id = 'bbbbbbbb...' (B) != current_tenant_id() = 'aaaaaaaa...' (A)
+--   -> raises 42501 BEFORE any INSERT or UPDATE executes (AC 16).
+--
+-- Note: this test does NOT exercise the per-row payload exploit path, because
+-- p_tenant_id=B itself triggers the scalar guard first. The per-row exploit
+-- (p_tenant_id=A but payload.tenant_id=B) is tested in BLOCK F (tests 19-21).
 --
 -- pgTAP's throws_ok wraps the call in a savepoint; the exception rolls back
 -- to the savepoint, so B's session row is unchanged.
@@ -449,9 +462,10 @@ select set_config(
 );
 set local role authenticated;
 
--- Test 14 — Cross-tenant call rejected by RLS WITH CHECK (42501).
--- The p_segments array contains a row with tenant_id = B.
--- INSERT WITH CHECK (tenant_id = current_tenant_id()) = B = A → false → 42501.
+-- Test 14 — Cross-tenant call rejected by scalar tenant guard (42501).
+-- p_tenant_id=B != current_tenant_id()=A -> guard 0 raises 42501 before any
+-- INSERT. (Under SECURITY DEFINER, RLS WITH CHECK does not apply; the scalar
+-- guard is the actual rejection point here, not per-row policy enforcement.)
 -- The entire function call is rolled back to the savepoint by throws_ok,
 -- so no partial state lands in B's tables.
 select throws_ok(
@@ -682,6 +696,231 @@ select is(
    from public.sessions
    where id = 'aaaaaaaa-5e09-4000-8000-000000000099'),
   'close_session_tx (0013): grand_total = time_total + orders_total - discount (invariant)');
+
+-- ===========================================================================
+-- BLOCK F — Per-row payload tenant-pin guards (migration 0014) [tests 19–21]
+--
+-- These tests prove the REAL exploit path that BLOCK D (test 14) did NOT
+-- cover. Test 14 rejects because p_tenant_id=B hits the SCALAR guard (guard 0)
+-- — not because of per-row enforcement. These tests call with p_tenant_id=A
+-- (passes the scalar guard) but embed tenant_id=B inside individual payload
+-- rows — the exploit that silently wrote to tenant B under SECURITY DEFINER
+-- before migration 0014 added per-row pin guards.
+--
+-- Migration 0014 adds three guards immediately after the scalar guards and
+-- before any INSERT; they raise 42501 if any payload row's tenant_id IS
+-- DISTINCT FROM p_tenant_id (NULL-safe). No data is written before the raise,
+-- and pgTAP's throws_ok savepoint rolls back the rejected call.
+--
+-- UUIDs (new — no collision with BLOCKS A–E):
+--   Cross-tenant audit row (test 19):     bbbbbbbb-a091-4000-8000-000000000019
+--   Cross-tenant movement row (test 21):  bbbbbbbb-5901-4000-8000-000000000021
+--   Audit row for test-21 call (valid A): aaaaaaaa-a091-4000-8000-000000000021
+--   Cross-tenant segment row (test 22):   bbbbbbbb-5e09-4000-8000-000000000022
+-- ===========================================================================
+
+-- Re-establish Manager Alpha JWT (tenant A) for BLOCK F.
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub',  '00000000-0000-4000-8000-000000000002',
+    'role', 'authenticated',
+    'app_metadata', json_build_object(
+      'tenant_id',      'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+      'roles',          'manager',
+      'is_super_admin', false
+    )
+  )::text,
+  true
+);
+set local role authenticated;
+
+-- Test 19 — Exploit path: p_tenant_id=A passes scalar guard, but p_audit.tenant_id=B
+-- is caught by the NEW per-row audit_log payload pin guard (migration 0014).
+-- Before 0014 this would silently write a row into tenant B's audit_log under
+-- SECURITY DEFINER (BYPASSRLS). After 0014 it raises 42501 before any INSERT.
+-- p_segments and p_movements are empty arrays so only the audit guard fires.
+select throws_ok(
+  $$ select public.close_session_tx(
+    'aaaaaaaa-5e09-4000-8000-000000000009'::uuid,   -- p_session_id (A; closed — guards fire first)
+    'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa'::uuid,   -- p_tenant_id = A (passes scalar guard)
+    'aaaa0001-0000-4000-8000-aaaaaaaaaaaa'::uuid,   -- p_branch_id
+    '00000000-0000-4000-8000-000000000002'::uuid,   -- p_actor_id
+    '{
+      "status":         "closed",
+      "ended_at":       "2026-06-26T11:00:00+00:00",
+      "time_total":     3000,
+      "grand_total":    3000,
+      "payment_method": "cash",
+      "shift_id":       null,
+      "updated_at":     "2026-06-26T11:00:00+00:00"
+    }'::jsonb,
+    '[]'::jsonb,   -- p_segments: empty — passes segments pin guard
+    '[]'::jsonb,   -- p_movements: empty — passes movements pin guard
+    'aaaaaaaa-de01-4000-8000-000000000001'::uuid,   -- p_device_id
+    -- p_audit: tenant_id=B -> caught by per-row audit_log pin guard -> 42501
+    '{
+      "id":        "bbbbbbbb-a091-4000-8000-000000000019",
+      "tenant_id": "bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb",
+      "branch_id": "bbbb0001-0000-4000-8000-bbbbbbbbbbbb",
+      "actor_id":  "00000000-0000-4000-8000-000000000002",
+      "action":    "session.close",
+      "entity":    "sessions",
+      "entity_id": "aaaaaaaa-5e09-4000-8000-000000000009",
+      "amount":    3000,
+      "meta":      {},
+      "created_at":"2026-06-26T11:00:00+00:00"
+    }'::jsonb
+  ) $$,
+  '42501', null,
+  'close_session_tx (0014): p_tenant_id=A but p_audit.tenant_id=B rejected by per-row payload pin (42501)');
+
+-- Reset to superuser to verify no cross-tenant write occurred.
+reset role;
+
+-- Test 20 — Zero rows in tenant B's audit_log (cross-tenant write never landed).
+-- The throws_ok savepoint rollback ensures the rejected call had zero effect.
+select is(
+  (select count(*)::bigint
+   from public.audit_log
+   where id = 'bbbbbbbb-a091-4000-8000-000000000019'),
+  0::bigint,
+  'close_session_tx (0014): cross-tenant audit_log payload rejected — zero B-rows written');
+
+-- Re-establish Manager Alpha JWT for test 21.
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub',  '00000000-0000-4000-8000-000000000002',
+    'role', 'authenticated',
+    'app_metadata', json_build_object(
+      'tenant_id',      'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+      'roles',          'manager',
+      'is_super_admin', false
+    )
+  )::text,
+  true
+);
+set local role authenticated;
+
+-- Test 21 — Exploit path: p_tenant_id=A, p_movements[0].tenant_id=B rejected by
+-- the NEW per-row stock_movements payload pin guard (migration 0014) before any write.
+-- p_segments is empty (passes segments guard); the movements guard fires first.
+select throws_ok(
+  $$ select public.close_session_tx(
+    'aaaaaaaa-5e09-4000-8000-000000000009'::uuid,   -- p_session_id (A)
+    'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa'::uuid,   -- p_tenant_id = A (passes scalar guard)
+    'aaaa0001-0000-4000-8000-aaaaaaaaaaaa'::uuid,   -- p_branch_id
+    '00000000-0000-4000-8000-000000000002'::uuid,   -- p_actor_id
+    '{
+      "status":         "closed",
+      "ended_at":       "2026-06-26T11:00:00+00:00",
+      "time_total":     3000,
+      "grand_total":    3000,
+      "payment_method": "cash",
+      "shift_id":       null,
+      "updated_at":     "2026-06-26T11:00:00+00:00"
+    }'::jsonb,
+    '[]'::jsonb,   -- p_segments: empty — passes segments pin guard
+    -- p_movements: tenant_id=B -> caught by per-row stock_movements pin guard -> 42501
+    '[{
+      "id":         "bbbbbbbb-5901-4000-8000-000000000021",
+      "tenant_id":  "bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb",
+      "branch_id":  "bbbb0001-0000-4000-8000-bbbbbbbbbbbb",
+      "product_id": "aaaaaaaa-c0de-4000-8000-000000000001",
+      "delta":      -1,
+      "reason":     "sale",
+      "order_id":   null,
+      "manager_id": "00000000-0000-4000-8000-000000000002",
+      "note":       null,
+      "created_at": "2026-06-26T11:00:00+00:00"
+    }]'::jsonb,
+    'aaaaaaaa-de01-4000-8000-000000000001'::uuid,   -- p_device_id
+    -- p_audit: tenant_id=A (valid); never reached because movements guard fires first
+    '{
+      "id":        "aaaaaaaa-a091-4000-8000-000000000021",
+      "tenant_id": "aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa",
+      "branch_id": "aaaa0001-0000-4000-8000-aaaaaaaaaaaa",
+      "actor_id":  "00000000-0000-4000-8000-000000000002",
+      "action":    "session.close",
+      "entity":    "sessions",
+      "entity_id": "aaaaaaaa-5e09-4000-8000-000000000009",
+      "amount":    3000,
+      "meta":      {},
+      "created_at":"2026-06-26T11:00:00+00:00"
+    }'::jsonb
+  ) $$,
+  '42501', null,
+  'close_session_tx (0014): p_tenant_id=A but p_movements.tenant_id=B rejected by per-row payload pin (42501)');
+
+reset role;
+
+-- Re-establish Manager Alpha JWT for test 22.
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub',  '00000000-0000-4000-8000-000000000002',
+    'role', 'authenticated',
+    'app_metadata', json_build_object(
+      'tenant_id',      'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+      'roles',          'manager',
+      'is_super_admin', false
+    )
+  )::text,
+  true
+);
+set local role authenticated;
+
+-- Test 22 — Exploit path: p_tenant_id=A, p_segments[0].tenant_id=B rejected by
+-- the per-row session_segments payload pin guard (migration 0014) before any write.
+-- This directly exercises the segments pin guard that tests 19/21 left uncovered.
+select throws_ok(
+  $$ select public.close_session_tx(
+    'aaaaaaaa-5e09-4000-8000-000000000009'::uuid,   -- p_session_id (A)
+    'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa'::uuid,   -- p_tenant_id = A (passes scalar guard)
+    'aaaa0001-0000-4000-8000-aaaaaaaaaaaa'::uuid,   -- p_branch_id
+    '00000000-0000-4000-8000-000000000002'::uuid,   -- p_actor_id
+    '{
+      "status":         "closed",
+      "ended_at":       "2026-06-26T11:00:00+00:00",
+      "time_total":     3000,
+      "grand_total":    3000,
+      "payment_method": "cash",
+      "shift_id":       null,
+      "updated_at":     "2026-06-26T11:00:00+00:00"
+    }'::jsonb,
+    -- p_segments: tenant_id=B -> caught by per-row session_segments pin guard -> 42501
+    '[{
+      "id":                      "bbbbbbbb-5e09-4000-8000-000000000022",
+      "tenant_id":               "bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb",
+      "session_id":              "bbbbbbbb-5e09-4000-8000-000000000009",
+      "play_mode":               "single",
+      "rate_rule_id":            null,
+      "price_per_hour_snapshot": 7000,
+      "started_at":              "2026-06-26T09:00:00+00:00",
+      "ended_at":                "2026-06-26T11:00:00+00:00",
+      "updated_at":              "2026-06-26T11:00:00+00:00"
+    }]'::jsonb,
+    '[]'::jsonb,   -- p_movements: empty
+    'aaaaaaaa-de01-4000-8000-000000000001'::uuid,   -- p_device_id
+    -- p_audit: tenant_id=A (valid); never reached because segments guard fires first
+    '{
+      "id":        "aaaaaaaa-a091-4000-8000-000000000022",
+      "tenant_id": "aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa",
+      "branch_id": "aaaa0001-0000-4000-8000-aaaaaaaaaaaa",
+      "actor_id":  "00000000-0000-4000-8000-000000000002",
+      "action":    "session.close",
+      "entity":    "sessions",
+      "entity_id": "aaaaaaaa-5e09-4000-8000-000000000009",
+      "amount":    3000,
+      "meta":      {},
+      "created_at":"2026-06-26T11:00:00+00:00"
+    }'::jsonb
+  ) $$,
+  '42501', null,
+  'close_session_tx (0014): p_tenant_id=A but p_segments.tenant_id=B rejected by per-row payload pin (42501)');
+
+reset role;
 
 -- ===========================================================================
 
