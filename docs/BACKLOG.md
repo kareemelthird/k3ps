@@ -15,6 +15,8 @@ These cannot be done by agents. They are pre-requisites for a fully operational 
 5. **Sentry — create projects and supply DSNs.** Create a Sentry account with one project for web and one for mobile. Set `NEXT_PUBLIC_SENTRY_DSN` (web env) and `EXPO_PUBLIC_SENTRY_DSN` (mobile env / EAS profile). Until set, Sentry is a no-op by design — no events are sent, no overhead, no errors. Optionally set `SENTRY_AUTH_TOKEN` (server/CI-only, never committed) to enable source-map upload.
 6. **EAS/Expo — create the Expo account and run the cloud build.** Create or confirm an Expo account, run `eas login` then `eas build:configure` (credential generation), then perform cloud `eas build` per the profiles in `apps/mobile/eas.json` (`development` / `preview` / `production`) and any store submission. Local `expo export` works without an account (and is what CI verifies).
 
+> **How to test right now (no setup):** use the **hosted demo** — it already has a working login (`owner@k3ps.test`) with `tenant_id` baked into the JWT, so RLS and the full app work without enabling the auth hook (#2). A fresh **local** `supabase db reset` is wired for the pgTAP isolation suite, **not** for interactive login: `supabase/seed.sql` intentionally omits passwords (pgTAP sets JWT claims directly), the local auth hook is not enabled, and the demo tenants have no `subscriptions` row and only `open`-mode rate rules. Interactive local testing therefore requires enabling the hook and provisioning a tenant via the `provision-tenant` edge function (or adding demo credentials/data to the seed — deliberately not done, to avoid perturbing the live pgTAP gate).
+
 ---
 
 ## Future / deferred work
@@ -39,6 +41,7 @@ These items were explicitly deferred from the 10-phase roadmap and require a new
 - **Web offline support** — the web app is online-only; offline is mobile-only via the outbox.
 - **`stripe_events` retention policy** — the dedupe table grows without bound; a TTL policy or archival job is needed.
 - **GDPR data export on cancel** — no self-service data export.
+- **Cross-tenant audit page pagination** — the super-admin audit view (`/admin/audit`) hard-caps at `LIMIT 500` with no date filter or pagination; tenants exceeding 500 events cannot see the full log. Needs a paged/filtered read.
 - **OS background-terminated sync** — the mobile outbox drains on next launch/foreground/reconnect; background delivery while the app is terminated is not implemented.
 
 ---
@@ -57,6 +60,12 @@ These items were explicitly deferred from the 10-phase roadmap and require a new
 - ✅ Perf: per-route First-Load JS ≤300 kB; `audit_log_entity_idx` for entity-history reads; mobile growable lists virtualized.
 - ✅ Security sweep: RLS `0001–0012` confirmed; edge-function auth correct; impersonation + webhook trust boundaries intact; secret hygiene on public repo confirmed.
 - ⚪ Explicitly out of scope: live Sentry ingestion verification / cloud EAS builds / store submission (user steps); Sentry tracing/replay/APM; load/pen testing; hosted axe/Lighthouse CI; web offline; `stripe_events` retention.
+
+### Pre-handoff whole-system audit — ✅ fixes applied (commit a15413d, 2026-06-29)
+> First integration audit across all phases (per-phase reviews only saw their own diff). Verdict before fixes: NOT-READY (1 money blocker + UX issues). After fixes: ready for hands-on testing.
+- ✅ **B3 (money blocker)** — `sessions.orders_total` was never updated after orders were added, so a session closed *with* orders stored `grand_total = time_total − discount` (orders excluded), cascading into wrong shift cash reconciliation. Fixed: mobile close now sums non-void order lines via `@ps/core` `computeOrdersTotalForSession` (reusing the existing orders fetch); the live prepaid/fixed-match on-screen total had the same stale-column read and is fixed too. Dead `_syncSessionOrdersTotal` + false "realtime updates it" comment + dead `useCloseSession` export removed.
+- ✅ **UX/i18n/a11y** — mobile shift/stock validation errors showed field *labels* instead of error text (added `*.error.*` keys); web hardcoded Arabic retry + status-filter strings → i18n; RTL breadcrumb arrow direction; RateRulesView modals migrated to the shared focus-trapping `Dialog`; `toArabicDigits` on sync times; stale `0011`→`0012` comments.
+- ⚪ Deferred (documented above, not code): local-seed login/data and auth-hook enablement (test via hosted demo / `provision-tenant`); cross-tenant audit pagination; Stripe live price IDs (test-mode).
 
 ### Phase 9 — SaaS billing (Stripe subscriptions, trial → tiers, paywall, plan management) — ✅ APPROVED / done
 > Spec: [`docs/specs/phase-9-saas-billing-stripe.md`](specs/phase-9-saas-billing-stripe.md) · Decision: ADR-0010.
