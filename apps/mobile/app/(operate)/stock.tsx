@@ -52,6 +52,7 @@ import {
   type StockMovementRow,
 } from '../../src/features/stock/api';
 import { useAuth } from '../../src/stores/useAuth';
+import { useMyPermissions } from '../../src/features/auth/usePermissions';
 import { colors, spacing, radius, TAP_TARGET, fontSize } from '../../src/design/tokens';
 import { AppText } from '../../src/components/AppText';
 import { Button } from '../../src/components/Button';
@@ -76,12 +77,15 @@ function StockCard({
   onRestock,
   onAdjust,
   canAdjust,
+  canRestock,
 }: {
   product: ProductRow;
   onHand: number | undefined;
   onRestock: () => void;
   onAdjust: () => void;
   canAdjust: boolean;
+  /** Gate: caller derives from useMyPermissions().can('can_restock'). */
+  canRestock: boolean;
 }) {
   const { t } = useTranslation();
 
@@ -140,11 +144,14 @@ function StockCard({
           </AppText>
         </View>
       </View>
+      {/* can_restock gate: disable the button (server RLS + stock_movements_staff_insert
+          policy is the authoritative gate via has_permission('can_restock')). */}
       <View style={styles.stockActions}>
         <Button
           variant="secondary"
           size="md"
           onPress={onRestock}
+          disabled={!canRestock}
           accessibilityLabel={t('stock.restock.title')}
         >
           {t('stock.restock.title')}
@@ -160,6 +167,15 @@ function StockCard({
           </Button>
         )}
       </View>
+      {!canRestock && (
+        <AppText
+          role="micro"
+          color={colors.textFaint}
+          accessibilityRole="text"
+        >
+          {t('permissions.noRestock')}
+        </AppText>
+      )}
     </View>
   );
 }
@@ -201,6 +217,12 @@ export default function StockScreen() {
   const branchId = activeBranchId;
   const managerId = user?.id ?? '';
   const isOwner = role === 'owner';
+
+  // Permission gates (ADR-0012 Decision B1): UI is not the authority — server is.
+  const perms = useMyPermissions();
+  const canRestock = perms.can('can_restock');
+  // can_manage_debts — Slice 3 guard point (debt stock/write paths):
+  //   const canManageDebts = perms.can('can_manage_debts');
 
   // ── Queries ──
   const { data: products, isLoading, error, refetch } = useProducts(tenantId);
@@ -333,6 +355,7 @@ export default function StockScreen() {
               setAdjustError(null);
             }}
             canAdjust={isOwner}
+            canRestock={canRestock}
           />
         </Pressable>
       );
@@ -345,6 +368,7 @@ export default function StockScreen() {
         onRestock={() => {}}
         onAdjust={() => {}}
         canAdjust={false}
+        canRestock={false}
       />
     );
   };

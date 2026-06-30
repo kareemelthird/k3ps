@@ -86,6 +86,7 @@ import { Sheet } from '../../../src/components/Sheet';
 import { Skeleton } from '../../../src/components/Skeleton';
 import { StatusPill } from '../../../src/components/StatusPill';
 import { useTick } from '../../../src/hooks/useTick';
+import { useMyPermissions } from '../../../src/features/auth/usePermissions';
 
 // ─── Sub-component: SegmentRow card ──────────────────────────────────────────
 
@@ -257,6 +258,8 @@ interface SessionOrdersSlotProps {
   managerId: string;
   shiftId: string | null;
   isClosed: boolean;
+  /** Gate: caller derives from useMyPermissions().can('can_void'). */
+  canVoid: boolean;
 }
 
 function SessionOrdersSlot({
@@ -266,6 +269,7 @@ function SessionOrdersSlot({
   managerId,
   shiftId,
   isClosed,
+  canVoid,
 }: SessionOrdersSlotProps) {
   const { t } = useTranslation();
 
@@ -404,6 +408,17 @@ function SessionOrdersSlot({
           {/* Existing session order lines */}
           {hasItems && (
             <View style={slotStyles.existingOrders}>
+              {/* can_void gate: show a single permission note at section level
+                  rather than repeating a grayed button on every line. */}
+              {!isClosed && !canVoid && (
+                <AppText
+                  role="micro"
+                  color={colors.textFaint}
+                  accessibilityRole="text"
+                >
+                  {t('permissions.noVoid')}
+                </AppText>
+              )}
               {existingOrders.map((order) =>
                 order.items
                   .filter((i) => !i.is_void)
@@ -423,7 +438,8 @@ function SessionOrdersSlot({
                           <AppText role="label" color={colors.primary}>
                             {formatEgp(item.qty * item.unit_price)}
                           </AppText>
-                          {!isClosed && (
+                          {/* Show void button only when session is open AND caller has can_void. */}
+                          {!isClosed && canVoid && (
                             <Pressable
                               onPress={() => void handleVoidItem(order, item)}
                               disabled={voidingItem}
@@ -650,6 +666,15 @@ export default function SessionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t } = useTranslation();
   const { claim, user } = useAuth();
+
+  // Permission gates (ADR-0012 Decision B1): UI is not the authority — server is.
+  // Permissions are queried from tenant_members, not the JWT claim.
+  const perms = useMyPermissions();
+  const canVoid     = perms.can('can_void');
+  const canDiscount = perms.can('can_discount');
+  // can_manage_debts — Slice 3 guard point (debt close + آجل repayment):
+  //   gate the 'debt' payment option and debt-payment recording with:
+  //   perms.can('can_manage_debts')
 
   const [closeSheetVisible, setCloseSheetVisible] = useState(false);
   const [confirmSwitchVisible, setConfirmSwitchVisible] = useState(false);
@@ -1142,6 +1167,7 @@ export default function SessionDetailScreen() {
             managerId={user?.id ?? ''}
             shiftId={openShiftData?.id ?? null}
             isClosed={isClosed}
+            canVoid={canVoid}
           />
         </View>
       </ScrollView>
@@ -1209,18 +1235,35 @@ export default function SessionDetailScreen() {
           )}
         </View>
 
-        {/* Discount input */}
+        {/* Discount input — gated by can_discount.
+            NOTE: The server does not yet enforce discount via RLS; enforcement is in
+            close_session_tx (ADR-0012 §0017 point 5 — requires security-reviewer sign-off).
+            This UI gate is a UX guard consistent with the permission model so staff
+            understand why they cannot apply a discount before Slice 3 wires the RPC guard. */}
         <View style={styles.closeField}>
-          <AppText role="label" color={colors.textMuted}>{t('session.close.discount')}</AppText>
+          <AppText role="label" color={canDiscount ? colors.textMuted : colors.textFaint}>
+            {t('session.close.discount')}
+          </AppText>
           <TextInput
-            style={styles.closeInput}
-            value={closeDiscountEgp}
-            onChangeText={setCloseDiscountEgp}
+            style={[styles.closeInput, !canDiscount && styles.closeInputLocked]}
+            value={canDiscount ? closeDiscountEgp : ''}
+            onChangeText={canDiscount ? setCloseDiscountEgp : undefined}
+            editable={canDiscount}
             placeholder={t('session.close.discountPlaceholder')}
             placeholderTextColor={colors.textFaint}
             keyboardType="decimal-pad"
             accessibilityLabel={t('session.close.discount')}
+            accessibilityState={{ disabled: !canDiscount }}
           />
+          {!canDiscount && (
+            <AppText
+              role="micro"
+              color={colors.textFaint}
+              accessibilityRole="text"
+            >
+              {t('permissions.noDiscount')}
+            </AppText>
+          )}
         </View>
 
         {/* Amount due (live) */}
@@ -1564,6 +1607,11 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: fontSize.body,
     minHeight: TAP_TARGET,
+  },
+  /** Applied over closeInput when can_discount is false. */
+  closeInputLocked: {
+    opacity: 0.45,
+    backgroundColor: colors.surface3,
   },
   // ── Extend prepaid sheet styles ──
   extendBlockList: {
