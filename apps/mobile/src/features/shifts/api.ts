@@ -132,7 +132,7 @@ export function useOpenShift_mutation() {
           opened_at: now,
           closed_at: null,
           opening_cash: input.openingCash,
-          expected_cash: null,
+          expected_cash: 0, // NOT NULL in DB (default 0); unknown until close
           actual_cash: null,
           difference: null,
           notes: null,
