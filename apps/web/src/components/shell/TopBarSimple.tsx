@@ -47,6 +47,8 @@ export function TopBarSimple({
     ...(isOwner ? [{ href: '/dashboard/billing', label: t('nav.billing') }] : []),
     // Staff management: owner-only (Slice 2, ADR-0012).
     ...(isOwner ? [{ href: '/dashboard/staff', label: t('nav.staff') }] : []),
+    // Debts: owner-only (Slice 3).
+    ...(isOwner ? [{ href: '/dashboard/debts', label: t('nav.debts') }] : []),
     // Settings: owner-only (Slice 2, ADR-0012 Decision C1).
     ...(isOwner ? [{ href: '/dashboard/settings', label: t('nav.settings') }] : []),
   ];

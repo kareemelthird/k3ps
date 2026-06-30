@@ -285,6 +285,7 @@
     "reports": "التقارير",
     "billing": "الفوترة",
     "staff": "الموظفون",
+    "debts": "الديون",
     "settings": "الإعدادات"
   },
   "products": {
@@ -944,6 +945,54 @@
       "lowStockNonNegative": "حد المخزون يجب أن يكون صفراً أو أكبر",
       "lowStockInteger": "حد المخزون يجب أن يكون رقماً صحيحاً",
       "peakTimeFormat": "صيغة الوقت يجب أن تكون HH:mm (مثال: ١٨:٠٠)"
+    }
+  },
+  "debts": {
+    "title": "الديون",
+    "subtitle": "متابعة وتسوية مديونيات العملاء",
+    "kpi": {
+      "outstanding": "إجمالي المستحق",
+      "openCount": "ديون مفتوحة",
+      "partialCount": "مدفوعة جزئياً"
+    },
+    "filter": {
+      "label": "تصفية الديون",
+      "all": "الكل",
+      "nonSettled": "غير مسوّى",
+      "settled": "مُسوَّى"
+    },
+    "status": {
+      "open": "مفتوح",
+      "partially_paid": "مدفوع جزئياً",
+      "settled": "مُسوَّى"
+    },
+    "col": {
+      "customer": "العميل",
+      "amount": "المبلغ الكلي",
+      "paid": "المدفوع",
+      "remaining": "المتبقي",
+      "date": "التاريخ",
+      "note": "ملاحظة"
+    },
+    "action": {
+      "recordPayment": "تسجيل دفعة",
+      "cancel": "إلغاء",
+      "confirm": "تأكيد الدفع"
+    },
+    "payment": {
+      "title": "تسجيل دفعة جديدة",
+      "amountLabel": "المبلغ المدفوع (ج.م)",
+      "amountHelper": "المبلغ المتبقي: {remaining}",
+      "success": "تم تسجيل الدفعة بنجاح"
+    },
+    "empty": {
+      "title": "لا توجد ديون",
+      "body": "لا توجد ديون مسجّلة"
+    },
+    "validation": {
+      "amountRequired": "المبلغ مطلوب",
+      "amountPositive": "يجب أن يكون المبلغ أكبر من صفر",
+      "amountExceedsRemaining": "المبلغ المدخل يتجاوز المتبقي للدين"
     }
   },
   "billing": {
