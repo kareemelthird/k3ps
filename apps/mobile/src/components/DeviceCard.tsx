@@ -1,43 +1,123 @@
 /**
  * DeviceCard — design system §9.11.
  * Glanceable grid cell: free / busy / maintenance.
- * - Free: status-free border + dot + "tap to start" affordance.
+ * - Free: status-free border + dot + "tap to start" affordance + quick-start button.
  * - Busy: status-busy border + LiveTimer (grid tickMs) + running total.
+ *   - Prepaid: live remaining time countdown + usage bar (turns red at ≤5 min).
  * - Maintenance: muted, non-interactive.
  *
  * Status is conveyed by pill + dot + border, NEVER color alone.
  * Money is via formatEgp (integer piastres). Timer from started_at.
  * Tap target ≥52 (the whole card).
+ *
+ * Slice 1 additions:
+ *   - onQuickStart prop: rendered as an "⚡ بدء سريع" button on free cards.
+ *   - session.prepaidMinutes + session.billingMode: drives prepaid countdown + bar.
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
-import { formatEgp } from '@ps/core';
+import { elapsedMinutes, formatEgp, toArabicDigits } from '@ps/core';
 import type { Device } from '@ps/core';
 
 import { colors, radius, spacing, TAP_TARGET } from '../design/tokens';
 import { AppText } from './AppText';
 import { LiveTimer } from './LiveTimer';
 import { StatusPill } from './StatusPill';
+import { useTick } from '../hooks/useTick';
 
 interface SessionInfo {
   startedAt: string;
   runningTotalPiastres?: number;
+  /** 'open' | 'prepaid' | 'fixed_match' — drives prepaid countdown visibility. */
+  billingMode?: string;
+  /** Advisory prepaid minutes (from session row). Drives the usage bar. */
+  prepaidMinutes?: number | null;
 }
 
 interface Props {
   device: Device;
   session?: SessionInfo;
   onPress?: () => void;
+  /** Called when the quick-start button is tapped on a free card. */
+  onQuickStart?: () => void;
   /** Grid tick interval; null disables live timer (off-screen). */
   gridTickMs?: number;
 }
+
+// ─── Prepaid remaining display (countdown + usage bar) ───────────────────────
+
+function PrepaidRemaining({
+  startedAt,
+  prepaidMinutes,
+  tickMs,
+}: {
+  startedAt: string;
+  prepaidMinutes: number;
+  tickMs: number;
+}) {
+  const { t } = useTranslation();
+  // Tick forces re-render — cost/time is always derived from timestamps.
+  useTick(tickMs);
+
+  const elapsed = elapsedMinutes(startedAt);
+  const remaining = Math.max(0, prepaidMinutes - elapsed);
+  const remainingRounded = Math.ceil(remaining);
+  const isEndingSoon = remaining <= 5;
+  const fraction = prepaidMinutes > 0
+    ? Math.min(1, elapsed / prepaidMinutes)
+    : 0;
+
+  const barColor = isEndingSoon ? colors.danger : colors.statusBusy;
+
+  return (
+    <View style={prepStyles.container}>
+      {/* Usage bar */}
+      <View style={prepStyles.track}>
+        <View
+          style={[prepStyles.fill, { width: `${Math.round(fraction * 100)}%`, backgroundColor: barColor }]}
+        />
+      </View>
+      {/* Remaining text */}
+      <AppText
+        role="micro"
+        color={isEndingSoon ? colors.danger : colors.textMuted}
+        accessibilityRole="text"
+      >
+        {isEndingSoon
+          ? t('session.prepaid.endingSoon')
+          : t('session.prepaid.remaining', {
+              minutes: toArabicDigits(String(remainingRounded)),
+            })}
+      </AppText>
+    </View>
+  );
+}
+
+const prepStyles = StyleSheet.create({
+  container: {
+    gap: 4,
+  },
+  track: {
+    height: 4,
+    backgroundColor: colors.surface3,
+    borderRadius: radius.pill,
+    overflow: 'hidden',
+  },
+  fill: {
+    height: 4,
+    borderRadius: radius.pill,
+  },
+});
+
+// ─── DeviceCard ───────────────────────────────────────────────────────────────
 
 export function DeviceCard({
   device,
   session,
   onPress,
+  onQuickStart,
   gridTickMs = 30_000,
 }: Props) {
   const { t } = useTranslation();
@@ -68,6 +148,9 @@ export function DeviceCard({
   ]
     .filter(Boolean)
     .join(' — ');
+
+  const isPrepaid =
+    isBusy && session?.billingMode === 'prepaid' && (session.prepaidMinutes ?? 0) > 0;
 
   return (
     <Pressable
@@ -106,9 +189,32 @@ export function DeviceCard({
       {/* Content area: free hint / busy timer + total / maintenance note */}
       <View style={styles.content}>
         {isFree && (
-          <AppText role="caption" color={colors.textFaint}>
-            {t('session.start.confirm')}
-          </AppText>
+          <View style={styles.freeContent}>
+            <AppText role="caption" color={colors.textFaint}>
+              {t('session.start.confirm')}
+            </AppText>
+            {/* Quick-start button — only shown when handler is provided */}
+            {onQuickStart && (
+              <Pressable
+                onPress={(e) => {
+                  // Stop propagation so the card's onPress doesn't fire too
+                  e.stopPropagation?.();
+                  onQuickStart();
+                }}
+                style={({ pressed }) => [
+                  styles.quickBtn,
+                  pressed && styles.quickBtnPressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={t('session.quickStart.label')}
+                hitSlop={4}
+              >
+                <AppText role="micro" color={colors.onPrimary}>
+                  {'⚡ '}{t('session.quickStart.label')}
+                </AppText>
+              </Pressable>
+            )}
+          </View>
         )}
 
         {isBusy && session && (
@@ -122,6 +228,14 @@ export function DeviceCard({
               <AppText role="money" color={colors.primary}>
                 {formatEgp(session.runningTotalPiastres)}
               </AppText>
+            )}
+            {/* Prepaid countdown + usage bar */}
+            {isPrepaid && session.prepaidMinutes != null && (
+              <PrepaidRemaining
+                startedAt={session.startedAt}
+                prepaidMinutes={session.prepaidMinutes}
+                tickMs={gridTickMs}
+              />
             )}
           </View>
         )}
@@ -157,7 +271,22 @@ const styles = StyleSheet.create({
   content: {
     marginTop: spacing.xs,
   },
+  freeContent: {
+    gap: spacing.xs,
+  },
   busyContent: {
     gap: spacing.xs,
+  },
+  quickBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.primary,
+    borderRadius: radius.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing['2xs'],
+    minHeight: 32,
+    justifyContent: 'center',
+  },
+  quickBtnPressed: {
+    backgroundColor: colors.primaryPress,
   },
 });

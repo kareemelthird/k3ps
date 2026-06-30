@@ -52,8 +52,9 @@
 --   Audit log row:     aaaaaaaa-a091-4000-8000-000000009009
 --   Fixture session B: bbbbbbbb-5e09-4000-8000-000000000009
 --
--- Plan: 23 tests (16 original + 3 added by migration 0013: BLOCK E
---       + 4 added by migrations 0014/0015: BLOCK F).
+-- Plan: 26 tests (16 original + 3 added by migration 0013: BLOCK E
+--       + 4 added by migrations 0014/0015: BLOCK F
+--       + 3 added by migration 0016: BLOCK G — discount persistence).
 -- Depends on seed.sql (Tenant A = aaaaaaaa…, Tenant B = bbbbbbbb…; devices,
 -- products, branches, and profiles already seeded).
 -- All fixture writes are inside this transaction and rolled back at the end.
@@ -61,7 +62,7 @@
 -- =============================================================================
 
 begin;
-select plan(23);
+select plan(26);
 
 -- ---------------------------------------------------------------------------
 -- FIXTURE SETUP (as superuser — before switching to the authenticated role)
@@ -921,6 +922,136 @@ select throws_ok(
   'close_session_tx (0014): p_tenant_id=A but p_segments.tenant_id=B rejected by per-row payload pin (42501)');
 
 reset role;
+
+-- ===========================================================================
+-- BLOCK G — discount persistence (migration 0016) [tests 24–26]
+--
+-- Proves close_session_tx now writes the operator-entered discount from the
+-- patch into sessions.discount. Before 0016 the set-list omitted discount, so
+-- a non-zero discount would leave the column at its old value (0) while
+-- grand_total was reduced — breaking the reconstruction invariant
+-- grand_total = time_total + orders_total − discount.
+--
+-- Fixture: a fresh active session on Device A-2 (free again after BLOCK E close).
+-- The patch sends time_total=6000, orders_total=0, discount=1000,
+-- grand_total=5000 (= 6000 + 0 − 1000). BLOCK E used discount=0 so it could not
+-- catch this bug; BLOCK G uses a NON-ZERO discount that does.
+--
+-- UUIDs (BLOCK G — valid RFC-4122 hex; d15c = "disc", no collision with A–F):
+--   Session G:   aaaaaaaa-d15c-4000-8000-000000000099
+--   Segment G:   aaaaaaaa-d15c-4000-8000-000000000199
+--   Audit log G: aaaaaaaa-d15c-4000-8000-000000000299
+-- ===========================================================================
+
+-- ── BLOCK G fixture setup (as superuser — role was reset above) ──────────────
+insert into public.sessions
+  (id, tenant_id, branch_id, device_id, manager_id,
+   billing_mode, status, started_at,
+   time_total, orders_total, grand_total, discount)
+values
+  ('aaaaaaaa-d15c-4000-8000-000000000099',
+   'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'aaaa0001-0000-4000-8000-aaaaaaaaaaaa',
+   'aaaaaaaa-de01-4000-8000-000000000002',   -- Device A-2
+   '00000000-0000-4000-8000-000000000002',   -- Manager Alpha
+   'open', 'active',
+   '2026-06-26T13:00:00+00:00'::timestamptz,
+   0, 0, 0, 0)
+on conflict (id) do nothing;
+
+insert into public.session_segments
+  (id, tenant_id, session_id, play_mode, price_per_hour_snapshot,
+   started_at, ended_at)
+values
+  ('aaaaaaaa-d15c-4000-8000-000000000199',
+   'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+   'aaaaaaaa-d15c-4000-8000-000000000099',
+   'single', 6000,
+   '2026-06-26T13:00:00+00:00'::timestamptz, null)
+on conflict (id) do nothing;
+
+-- Re-establish Manager Alpha JWT (tenant A) for BLOCK G.
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub',  '00000000-0000-4000-8000-000000000002',
+    'role', 'authenticated',
+    'app_metadata', json_build_object(
+      'tenant_id',      'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa',
+      'roles',          'manager',
+      'is_super_admin', false
+    )
+  )::text,
+  true
+);
+set local role authenticated;
+
+-- Test 24 — close with a NON-ZERO discount=1000; grand_total=5000.
+select lives_ok(
+  $$ select public.close_session_tx(
+    'aaaaaaaa-d15c-4000-8000-000000000099'::uuid,   -- p_session_id
+    'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa'::uuid,   -- p_tenant_id
+    'aaaa0001-0000-4000-8000-aaaaaaaaaaaa'::uuid,   -- p_branch_id
+    '00000000-0000-4000-8000-000000000002'::uuid,   -- p_actor_id
+    '{
+      "status":         "closed",
+      "ended_at":       "2026-06-26T14:00:00+00:00",
+      "time_total":     6000,
+      "orders_total":   0,
+      "discount":       1000,
+      "grand_total":    5000,
+      "payment_method": "cash",
+      "shift_id":       null,
+      "updated_at":     "2026-06-26T14:00:00+00:00"
+    }'::jsonb,
+    '[{
+      "id":                      "aaaaaaaa-d15c-4000-8000-000000000199",
+      "tenant_id":               "aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa",
+      "session_id":              "aaaaaaaa-d15c-4000-8000-000000000099",
+      "play_mode":               "single",
+      "rate_rule_id":            null,
+      "price_per_hour_snapshot": 6000,
+      "started_at":              "2026-06-26T13:00:00+00:00",
+      "ended_at":                "2026-06-26T14:00:00+00:00",
+      "updated_at":              "2026-06-26T14:00:00+00:00"
+    }]'::jsonb,
+    '[]'::jsonb,                                    -- p_movements: none
+    'aaaaaaaa-de01-4000-8000-000000000002'::uuid,   -- p_device_id (A-2)
+    '{
+      "id":        "aaaaaaaa-d15c-4000-8000-000000000299",
+      "tenant_id": "aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa",
+      "branch_id": "aaaa0001-0000-4000-8000-aaaaaaaaaaaa",
+      "actor_id":  "00000000-0000-4000-8000-000000000002",
+      "action":    "session.close",
+      "entity":    "sessions",
+      "entity_id": "aaaaaaaa-d15c-4000-8000-000000000099",
+      "amount":    5000,
+      "meta":      {"billing_mode":"open","time_total":6000,"discount":1000},
+      "created_at":"2026-06-26T14:00:00+00:00"
+    }'::jsonb
+  ) $$,
+  'close_session_tx (0016): close with non-zero discount succeeds');
+
+reset role;
+
+-- Test 25 — sessions.discount persists the patch value (1000), not the old 0.
+select is(
+  (select discount::bigint
+   from public.sessions
+   where id = 'aaaaaaaa-d15c-4000-8000-000000000099'),
+  1000::bigint,
+  'close_session_tx (0016): discount = patch value (1000 p) after close');
+
+-- Test 26 — invariant holds with a real discount:
+-- grand_total(5000) = time_total(6000) + orders_total(0) − discount(1000).
+select is(
+  (select grand_total::bigint
+   from public.sessions
+   where id = 'aaaaaaaa-d15c-4000-8000-000000000099'),
+  (select (time_total + orders_total - discount)::bigint
+   from public.sessions
+   where id = 'aaaaaaaa-d15c-4000-8000-000000000099'),
+  'close_session_tx (0016): grand_total = time_total + orders_total - discount (non-zero discount)');
 
 -- ===========================================================================
 

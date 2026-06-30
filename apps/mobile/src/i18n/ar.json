@@ -28,6 +28,19 @@
     "empty": {
       "title": "لا توجد أجهزة",
       "body": "لم يتم إضافة أي أجهزة لهذا الفرع بعد"
+    },
+    "search": {
+      "placeholder": "بحث عن جهاز..."
+    },
+    "filter": {
+      "all": "الكل",
+      "free": "متاح",
+      "busy": "مشغول",
+      "maintenance": "صيانة"
+    },
+    "endingSoon": {
+      "strip": "{{countDisplay}} جلسة تنتهي قريباً",
+      "show": "عرض فقط"
     }
   },
   "device": {
@@ -78,8 +91,34 @@
       "summary": "ملخص الجلسة",
       "timeCost": "تكلفة الوقت",
       "grandTotal": "الإجمالي",
+      "amountDue": "المستحق",
+      "ordersTotal": "إجمالي الطلبات",
       "noSegments": "لا توجد بيانات تسعير — سيتم الإغلاق بقيمة صفر",
-      "error": "فشل إنهاء الجلسة — حاول مرة أخرى"
+      "error": "فشل إنهاء الجلسة — حاول مرة أخرى",
+      "paymentMethod": "طريقة الدفع",
+      "method": {
+        "cash": "نقدي",
+        "wallet": "محفظة",
+        "other": "أخرى"
+      },
+      "discount": "خصم (ج.م)",
+      "discountPlaceholder": "٠",
+      "cashReceived": "نقد مستلم",
+      "changeDue": "الباقي للعميل"
+    },
+    "prepaid": {
+      "remaining": "{{minutes}} دقيقة متبقية",
+      "endingSoon": "ينتهي قريباً",
+      "extend": {
+        "title": "تمديد الوقت",
+        "block": "{{minutes}} دقيقة — {{price}}",
+        "confirm": "إضافة وقت",
+        "error": "فشل التمديد — حاول مرة أخرى",
+        "none": "لا توجد باقات متاحة"
+      }
+    },
+    "quickStart": {
+      "label": "بدء سريع"
     },
     "closed": {
       "title": "الجلسة منتهية"
@@ -234,6 +273,19 @@
       "addFailed": "فشل إضافة الطلب — حاول مرة أخرى",
       "voidFailed": "فشل إلغاء المنتج — حاول مرة أخرى",
       "payFailed": "فشل الدفع — حاول مرة أخرى"
+    },
+    "search": {
+      "placeholder": "بحث عن منتج..."
+    },
+    "quickAdd": "إضافة سريعة",
+    "repeatLast": {
+      "label": "إعادة آخر طلب",
+      "none": "لا يوجد طلب سابق",
+      "outOfStock": "بعض المنتجات نفدت — تم التعديل تلقائياً"
+    },
+    "stepper": {
+      "increase": "زيادة الكمية",
+      "decrease": "تقليل الكمية"
     }
   },
   "stock": {

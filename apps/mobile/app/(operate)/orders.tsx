@@ -1,29 +1,29 @@
 /**
- * Orders screen — Phase 5 (ADR-0006 Decisions 2, 3, 4, 7, 8).
+ * Orders screen — Slice 1 additions on top of Phase 5 (ADR-0006).
+ *
+ * New in Slice 1:
+ *   10. Quantity stepper per product in the cart (+ / − / qty badge);
+ *       first grid tap = add 1, subsequent taps via stepper.
+ *   11. Search box for products (in addition to category chips).
+ *   12. Quick-add chips: first 6 products as one-tap add chips above the grid.
+ *   13. Repeat last walk-in sale: rebuild previous ticket's lines from current
+ *       products; guard against now-out-of-stock items (warn, don't block).
  *
  * Two modes:
  *   A. Session-attached: tap a product → add to the active session's order.
- *      The order total folds into session.orders_total → grand_total at close.
- *   B. Walk-in: standalone order (session_id=null), paid directly with a
- *      payment_method (cash/wallet/other; debt NOT selectable).
+ *   B. Walk-in: standalone order paid directly with a payment_method.
  *
- * Performance (ADR-0011 §Q4, AC 16): product catalog uses FlatList with numColumns=2
- * as the outer scroll container so large catalogs (50+ products) stay smooth.
- * Category filter + cart + walk-in orders live in ListHeaderComponent /
- * ListFooterComponent respectively.
- *
- * A11y (ADR-0011 §Q5, AC 22): ProductCard carries accessibilityRole + state;
- * error views use accessibilityRole="alert"; pay confirm button is labelled.
+ * Performance: FlatList numColumns=2 as outer scroll container (AC 16).
+ * A11y: ProductCard has accessibilityRole + state; pay confirm button is labelled.
  *
  * INVARIANTS:
- *   - unit_price snapshotted at add-time (catalog price at that instant).
+ *   - unit_price snapshotted at add-time.
  *   - computeOrderTotal from @ps/core — no inline money math.
  *   - Stock badge via stockStatus (out/low/ok/untracked).
  *   - Oversell: warn via badge, never block the sale.
- *   - Void: sets is_void=true; rewrites total; writes audit.
  *   - All strings via t('key'). Arabic-Indic numerals. RTL.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -49,6 +49,7 @@ import {
   useAddOrder,
   useVoidOrderItem,
   usePayWalkInOrder,
+  useLastPaidWalkIn,
   isProductTracked,
   type ProductRow,
   type OrderRow,
@@ -66,6 +67,9 @@ import { DeviceCardSkeleton } from '../../src/components/Skeleton';
 import { OfflineBanner } from '../../src/components/OfflineBanner';
 import { SegmentedControl } from '../../src/components/SegmentedControl';
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+const QUICK_ADD_COUNT = 6;
+
 // ─── Stock badge ──────────────────────────────────────────────────────────────
 
 function StockBadge({ product, onHand }: { product: ProductRow; onHand: number | undefined }) {
@@ -80,12 +84,7 @@ function StockBadge({ product, onHand }: { product: ProductRow; onHand: number |
     untracked: colors.textFaint,
   };
   return (
-    <View
-      style={[
-        styles.badge,
-        { backgroundColor: colorMap[status] ?? colors.textFaint },
-      ]}
-    >
+    <View style={[styles.badge, { backgroundColor: colorMap[status] ?? colors.textFaint }]}>
       <AppText role="micro" color={colors.onPrimary}>
         {t(`stock.status.${status}`)}
       </AppText>
@@ -150,44 +149,60 @@ function ProductCard({
   );
 }
 
-// ─── Cart item row ────────────────────────────────────────────────────────────
+// ─── Cart item row with quantity stepper ─────────────────────────────────────
 
 function CartItemRow({
-  item,
   productName,
-  onVoid,
+  unitPrice,
+  qty,
+  onIncrease,
+  onDecrease,
 }: {
-  item: { productId: string; qty: number; unitPrice: number; isVoid?: boolean };
   productName: string;
-  onVoid: () => void;
+  unitPrice: number;
+  qty: number;
+  onIncrease: () => void;
+  onDecrease: () => void;
 }) {
   const { t } = useTranslation();
-  if (item.isVoid) return null;
 
   return (
     <View style={styles.cartRow}>
       <View style={styles.cartLeft}>
         <AppText role="body">{productName}</AppText>
         <AppText role="caption" color={colors.textMuted}>
-          {toArabicDigits(String(item.qty))} × {formatEgp(item.unitPrice)}
+          {formatEgp(unitPrice)}
         </AppText>
       </View>
-      <View style={styles.cartRight}>
-        <AppText role="label" color={colors.primary}>
-          {formatEgp(item.qty * item.unitPrice)}
-        </AppText>
+      {/* Stepper */}
+      <View style={styles.stepper}>
         <Pressable
-          onPress={onVoid}
-          style={styles.voidBtn}
+          onPress={onDecrease}
+          style={({ pressed }) => [styles.stepBtn, pressed && styles.stepBtnPressed]}
           accessibilityRole="button"
-          accessibilityLabel={t('orders.void.title')}
-          hitSlop={8}
+          accessibilityLabel={t('orders.stepper.decrease')}
+          hitSlop={4}
         >
-          <AppText role="caption" color={colors.danger}>
-            {t('orders.void.title')}
+          <AppText role="label" color={colors.text}>{'−'}</AppText>
+        </Pressable>
+        <View style={styles.stepQty} accessible accessibilityRole="text">
+          <AppText role="label" color={colors.primary}>
+            {toArabicDigits(String(qty))}
           </AppText>
+        </View>
+        <Pressable
+          onPress={onIncrease}
+          style={({ pressed }) => [styles.stepBtn, pressed && styles.stepBtnPressed]}
+          accessibilityRole="button"
+          accessibilityLabel={t('orders.stepper.increase')}
+          hitSlop={4}
+        >
+          <AppText role="label" color={colors.text}>{'+'}</AppText>
         </Pressable>
       </View>
+      <AppText role="label" color={colors.primary} style={styles.cartLineTotal}>
+        {formatEgp(qty * unitPrice)}
+      </AppText>
     </View>
   );
 }
@@ -272,15 +287,17 @@ export default function OrdersScreen() {
   const { data: stockLevels } = useStockLevels(tenantId, branchId);
   const { data: walkInOrders, refetch: refetchWalkIns } = useWalkInOrders(tenantId, branchId);
   const { data: openShift } = useOpenShift(tenantId, branchId);
+  const { data: lastPaidWalkIn } = useLastPaidWalkIn(tenantId, branchId);
 
   // ── Mutations ──
   const { mutateAsync: addOrder, isPending: addingOrder } = useAddOrder();
-  const { mutateAsync: voidItem, isPending: voidingItem } = useVoidOrderItem();
+  const { mutateAsync: voidItem } = useVoidOrderItem();
   const { mutateAsync: payOrder, isPending: payingOrder } = usePayWalkInOrder();
 
-  // ── Cart state ──
+  // ── Cart state: productId → qty ──
   const [cart, setCart] = useState<Map<string, number>>(new Map());
   const [addError, setAddError] = useState<string | null>(null);
+  const [repeatNotice, setRepeatNotice] = useState<string | null>(null);
 
   // ── Walk-in order being managed ──
   const [activeWalkInOrder, setActiveWalkInOrder] =
@@ -288,6 +305,11 @@ export default function OrdersScreen() {
   const [paySheetVisible, setPaySheetVisible] = useState(false);
   const [payMethod, setPayMethod] = useState<'cash' | 'wallet' | 'other'>('cash');
   const [payError, setPayError] = useState<string | null>(null);
+
+  // ── Slice 1: search + category filter ────────────────────────────────────
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('');
 
   // ── Stock level map ──
   const stockMap = useMemo(() => {
@@ -305,32 +327,100 @@ export default function OrdersScreen() {
     return ['', ...Array.from(cats)];
   }, [products]);
 
-  const [selectedCategory, setSelectedCategory] = useState('');
+  // ── Product maps ──
+  const productMap = useMemo(() => {
+    const m = new Map<string, ProductRow>();
+    (products ?? []).forEach((p) => m.set(p.id, p));
+    return m;
+  }, [products]);
 
+  // ── Filtered products (category + search) ──
   const filteredProducts = useMemo(() => {
-    if (!selectedCategory) return products ?? [];
-    return (products ?? []).filter((p) => p.category === selectedCategory);
-  }, [products, selectedCategory]);
+    let list = products ?? [];
+    if (selectedCategory) {
+      list = list.filter((p) => p.category === selectedCategory);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter((p) => p.name.toLowerCase().includes(q));
+    }
+    return list;
+  }, [products, selectedCategory, searchQuery]);
+
+  // ── Quick-add chips: first 6 products (all categories, unfiltered) ──
+  const quickAddProducts = useMemo(
+    () => (products ?? []).slice(0, QUICK_ADD_COUNT),
+    [products],
+  );
 
   // ── Cart total ──
   const cartTotal = useMemo(() => {
-    if (!products) return 0;
-    const productMap = new Map(products.map((p) => [p.id, p]));
     let total = 0;
     cart.forEach((qty, productId) => {
       const product = productMap.get(productId);
       if (product && qty > 0) total += qty * product.price;
     });
     return total;
-  }, [cart, products]);
+  }, [cart, productMap]);
 
-  // ── Add to cart ──
-  const handleAddToCart = (product: ProductRow) => {
+  // ── Cart handlers ──
+  const handleAddToCart = useCallback((product: ProductRow) => {
     setCart((prev) => {
       const next = new Map(prev);
       next.set(product.id, (next.get(product.id) ?? 0) + 1);
       return next;
     });
+  }, []);
+
+  const handleIncreaseQty = useCallback((productId: string) => {
+    setCart((prev) => {
+      const next = new Map(prev);
+      next.set(productId, (next.get(productId) ?? 0) + 1);
+      return next;
+    });
+  }, []);
+
+  const handleDecreaseQty = useCallback((productId: string) => {
+    setCart((prev) => {
+      const next = new Map(prev);
+      const current = next.get(productId) ?? 0;
+      if (current <= 1) next.delete(productId);
+      else next.set(productId, current - 1);
+      return next;
+    });
+  }, []);
+
+  // ── Repeat last walk-in sale ──
+  const handleRepeatLast = () => {
+    if (!lastPaidWalkIn || !products) {
+      setRepeatNotice(t('orders.repeatLast.none'));
+      return;
+    }
+
+    const newCart = new Map<string, number>();
+    let hadOutOfStock = false;
+
+    for (const item of lastPaidWalkIn.items) {
+      if (item.is_void) continue;
+      const product = productMap.get(item.product_id);
+      if (!product || !product.is_active) continue;
+
+      // Warn if tracked and out of stock but still add
+      const onHand = stockMap.get(item.product_id);
+      const isOut = isProductTracked(product.stock) && (onHand ?? 0) <= 0;
+      if (isOut) hadOutOfStock = true;
+
+      newCart.set(item.product_id, (newCart.get(item.product_id) ?? 0) + item.qty);
+    }
+
+    if (newCart.size === 0) {
+      setRepeatNotice(t('orders.repeatLast.none'));
+      return;
+    }
+
+    setCart(newCart);
+    setRepeatNotice(hadOutOfStock ? t('orders.repeatLast.outOfStock') : null);
+    setAddError(null);
   };
 
   // ── Submit cart as new walk-in order ──
@@ -338,8 +428,8 @@ export default function OrdersScreen() {
     if (!tenantId || !branchId || !managerId || cart.size === 0) return;
     if (!products) return;
     setAddError(null);
+    setRepeatNotice(null);
 
-    const productMap = new Map(products.map((p) => [p.id, p]));
     const items: { productId: string; unitPrice: number; qty: number }[] = [];
     cart.forEach((qty, productId) => {
       const p = productMap.get(productId);
@@ -394,7 +484,6 @@ export default function OrdersScreen() {
   const handlePay = async () => {
     if (!activeWalkInOrder || !tenantId || !branchId || !managerId) return;
     setPayError(null);
-    const productMap = new Map((products ?? []).map((p) => [p.id, p]));
 
     try {
       await payOrder({
@@ -459,12 +548,44 @@ export default function OrdersScreen() {
     );
   }
 
-  // ── FlatList header: screen title + category filter ──
+  // ── FlatList header: title + search + category + quick-add + repeat-last ──
   const ListHeader = (
     <View>
       <View style={styles.header}>
         <AppText role="h2">{t('orders.title')}</AppText>
+        {/* Repeat last sale button */}
+        {lastPaidWalkIn && (
+          <Pressable
+            onPress={handleRepeatLast}
+            style={({ pressed }) => [
+              styles.repeatBtn,
+              pressed && styles.repeatBtnPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={t('orders.repeatLast.label')}
+          >
+            <AppText role="caption" color={colors.primary}>
+              {'↺ '}{t('orders.repeatLast.label')}
+            </AppText>
+          </Pressable>
+        )}
       </View>
+
+      {/* Search box */}
+      <View style={styles.searchRow}>
+        <TextInput
+          style={styles.searchInput}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder={t('orders.search.placeholder')}
+          placeholderTextColor={colors.textFaint}
+          accessibilityLabel={t('orders.search.placeholder')}
+          returnKeyType="search"
+          clearButtonMode="while-editing"
+        />
+      </View>
+
+      {/* Category chips */}
       {categories.length > 1 && (
         <ScrollView
           horizontal
@@ -493,13 +614,64 @@ export default function OrdersScreen() {
           ))}
         </ScrollView>
       )}
+
+      {/* Quick-add chips — first 6 products */}
+      {quickAddProducts.length > 0 && (
+        <View style={styles.quickAddSection}>
+          <AppText role="micro" color={colors.textFaint} style={styles.quickAddLabel}>
+            {t('orders.quickAdd')}
+          </AppText>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quickAddScroll}
+          >
+            {quickAddProducts.map((p) => {
+              const qty = cart.get(p.id) ?? 0;
+              return (
+                <Pressable
+                  key={p.id}
+                  onPress={() => handleAddToCart(p)}
+                  style={({ pressed }) => [
+                    styles.quickAddChip,
+                    pressed && styles.quickAddChipPressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${p.name} — ${formatEgp(p.price)}`}
+                >
+                  <AppText role="caption" numberOfLines={1}>
+                    {p.name}
+                  </AppText>
+                  <AppText role="micro" color={colors.primary}>
+                    {formatEgp(p.price)}
+                  </AppText>
+                  {qty > 0 && (
+                    <View style={styles.qtyBadgeSmall}>
+                      <AppText role="micro" color={colors.onPrimary}>
+                        {toArabicDigits(String(qty))}
+                      </AppText>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
     </View>
   );
 
   // ── FlatList footer: cart + walk-in orders ──
   const ListFooter = (
     <View style={styles.footerContent}>
-      {/* Cart summary (new order) */}
+      {/* Repeat notice */}
+      {repeatNotice && (
+        <View style={styles.notice} accessible accessibilityRole="none">
+          <AppText role="caption" color={colors.warning}>{repeatNotice}</AppText>
+        </View>
+      )}
+
+      {/* Cart summary with steppers */}
       {cart.size > 0 && (
         <View style={styles.cartSection}>
           <AppText role="h3" style={styles.sectionTitle}>
@@ -508,22 +680,16 @@ export default function OrdersScreen() {
           {Array.from(cart.entries())
             .filter(([, qty]) => qty > 0)
             .map(([productId, qty]) => {
-              const product = (products ?? []).find((p) => p.id === productId);
+              const product = productMap.get(productId);
               if (!product) return null;
               return (
                 <CartItemRow
                   key={productId}
-                  item={{ productId, qty, unitPrice: product.price }}
                   productName={product.name}
-                  onVoid={() => {
-                    setCart((prev) => {
-                      const next = new Map(prev);
-                      const current = next.get(productId) ?? 0;
-                      if (current <= 1) next.delete(productId);
-                      else next.set(productId, current - 1);
-                      return next;
-                    });
-                  }}
+                  unitPrice={product.price}
+                  qty={qty}
+                  onIncrease={() => handleIncreaseQty(productId)}
+                  onDecrease={() => handleDecreaseQty(productId)}
                 />
               );
             })}
@@ -587,7 +753,7 @@ export default function OrdersScreen() {
     </View>
   );
 
-  // ── Render — FlatList as outer scroll container (AC 16 — virtualized catalog) ──
+  // ── Render — FlatList as outer scroll container ──
   return (
     <SafeAreaView style={styles.screen}>
       <OfflineBanner />
@@ -679,10 +845,42 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
   },
   header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  repeatBtn: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.xs,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    minHeight: 36,
+    justifyContent: 'center',
+  },
+  repeatBtnPressed: {
+    backgroundColor: colors.surface3,
+  },
+  searchRow: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+  },
+  searchInput: {
+    backgroundColor: colors.surface3,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    color: colors.text,
+    fontSize: fontSize.body,
+    minHeight: TAP_TARGET,
+    textAlign: 'right',
   },
   flatListContent: {
     paddingBottom: spacing['3xl'],
@@ -713,7 +911,44 @@ const styles = StyleSheet.create({
   categoryChipActive: {
     backgroundColor: colors.primary,
   },
-  // Product grid: FlatList manages numColumns=2; flex:1 fills each column.
+  quickAddSection: {
+    paddingTop: spacing.sm,
+    gap: spacing['2xs'],
+  },
+  quickAddLabel: {
+    paddingHorizontal: spacing.xl,
+  },
+  quickAddScroll: {
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.sm,
+    gap: spacing.sm,
+    flexDirection: 'row',
+  },
+  quickAddChip: {
+    backgroundColor: colors.surface2,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    minWidth: 80,
+    maxWidth: 140,
+    gap: 2,
+    position: 'relative',
+  },
+  quickAddChipPressed: {
+    backgroundColor: colors.surface3,
+  },
+  qtyBadgeSmall: {
+    position: 'absolute',
+    top: -4,
+    start: -4,
+    backgroundColor: colors.primary,
+    borderRadius: radius.pill,
+    width: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Product grid
   productGridRow: {
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.sm,
@@ -765,6 +1000,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Cart with steppers
   cartSection: {
     paddingHorizontal: spacing.md,
     backgroundColor: colors.surface,
@@ -780,11 +1016,11 @@ const styles = StyleSheet.create({
   },
   cartRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: spacing.xs,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    gap: spacing.sm,
   },
   cartLeft: {
     flex: 1,
@@ -793,6 +1029,30 @@ const styles = StyleSheet.create({
   cartRight: {
     alignItems: 'flex-end',
     gap: 4,
+  },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  stepBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.xs,
+    backgroundColor: colors.surface3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepBtnPressed: {
+    backgroundColor: colors.border,
+  },
+  stepQty: {
+    minWidth: 28,
+    alignItems: 'center',
+  },
+  cartLineTotal: {
+    minWidth: 72,
+    textAlign: 'right',
   },
   voidBtn: {
     minHeight: 32,
@@ -823,5 +1083,13 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  notice: {
+    marginHorizontal: spacing.md,
+    padding: spacing.sm,
+    backgroundColor: colors.surface2,
+    borderRadius: radius.xs,
+    borderWidth: 1,
+    borderColor: colors.warning,
   },
 });

@@ -354,6 +354,11 @@ export interface CloseSessionPhase4Input {
    * null if no shift is open.
    */
   shiftId?: string | null;
+  /**
+   * Slice 1: operator-entered discount in piastres. Clamps grand_total ≥ 0.
+   * Overrides session.discount (which is always 0 until the operator sets it here).
+   */
+  discount?: number;
 }
 
 /**
@@ -498,10 +503,13 @@ export function useCloseSessionPhase4() {
         })),
       );
 
+      // Slice 1: honour caller-supplied discount (operator enters at close time).
+      // Fall back to session row value (always 0 currently), then 0.
+      const discountPiastres = input.discount ?? input.session.discount ?? 0;
       const grandTotal = computeGrandTotal({
         time_total: timeTotalPiastres,
         orders_total: ordersTotal,
-        discount: input.session.discount ?? 0,
+        discount: discountPiastres,
       });
 
       if (sessionOrders && sessionOrders.length > 0) {
@@ -570,6 +578,7 @@ export function useCloseSessionPhase4() {
             time_total: timeTotalPiastres,
             orders_total: ordersTotal,
             grand_total: grandTotal,
+            discount: discountPiastres,
             payment_method: input.paymentMethod ?? null,
             shift_id: input.shiftId ?? null,
             updated_at: now,
@@ -647,6 +656,95 @@ export function useIncrementMatchCount() {
       });
       return { newCount };
     },
+    onSettled: (_data, _err, input) => {
+      void qc.invalidateQueries({
+        queryKey: sessionKeys.detail(input.sessionId, input.tenantId),
+      });
+    },
+  });
+}
+
+// ─── Mutation: extend prepaid (Slice 1 feature D) ────────────────────────────
+
+export interface ExtendPrepaidInput {
+  sessionId: string;
+  tenantId: string;
+  branchId: string;
+  managerId: string;
+  /** Current locked total so we can compute the new total (piastres). */
+  currentPrepaidTotal: number;
+  /** Current advisory minutes; null if not set. */
+  currentPrepaidMinutes: number | null;
+  /** Price of the added block (piastres), locked at purchase — no re-price. */
+  blockPrice: number;
+  /** Advisory minutes added for display purposes only. */
+  blockMinutes: number;
+}
+
+/**
+ * Accumulate a paid block onto a prepaid session:
+ *   - prepaid_total += blockPrice  (never re-priced from current rules)
+ *   - prepaid_minutes += blockMinutes  (advisory; billing from prepaid_total)
+ *
+ * Idempotent: localId = uuidv5(key, NS) keyed to the confirmed-at timestamp
+ * so a crash + replay produces the same row (no double-add).
+ */
+export function useExtendPrepaid() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: ExtendPrepaidInput) => {
+      const now = nowIso();
+      const newTotal = input.currentPrepaidTotal + input.blockPrice;
+      const newMinutes = (input.currentPrepaidMinutes ?? 0) + input.blockMinutes;
+      const localId = uuidv5(`extend-prepaid:${input.sessionId}:${now}`, PS_UUID_NS);
+      const auditId = uuidv5(`extend-prepaid-audit:${input.sessionId}:${now}`, PS_UUID_NS);
+
+      await persistRow({
+        localId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'sessions',
+        op: 'update',
+        payload: {
+          id: input.sessionId,
+          tenant_id: input.tenantId,
+          prepaid_total: newTotal,
+          prepaid_minutes: newMinutes,
+          updated_at: now,
+        },
+        conflict: 'merge',
+      });
+
+      await persistRow({
+        localId: auditId,
+        tenantId: input.tenantId,
+        branchId: input.branchId,
+        table: 'audit_log',
+        op: 'upsert',
+        payload: {
+          id: auditId,
+          tenant_id: input.tenantId,
+          branch_id: input.branchId,
+          actor_id: input.managerId,
+          action: 'session.prepaid.extend',
+          entity: 'sessions',
+          entity_id: input.sessionId,
+          amount: input.blockPrice,
+          meta: {
+            block_minutes: input.blockMinutes,
+            new_prepaid_total: newTotal,
+            new_prepaid_minutes: newMinutes,
+          },
+          created_at: now,
+        },
+        conflict: 'ignore',
+        dependsOn: [localId],
+      });
+
+      return { newTotal, newMinutes };
+    },
+
     onSettled: (_data, _err, input) => {
       void qc.invalidateQueries({
         queryKey: sessionKeys.detail(input.sessionId, input.tenantId),

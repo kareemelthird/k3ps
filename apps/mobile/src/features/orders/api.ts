@@ -233,6 +233,41 @@ export function useWalkInOrders(
   });
 }
 
+// ─── Last paid walk-in order (for "repeat last sale" feature) ────────────────
+
+/**
+ * Returns the most recently paid walk-in order for this branch, or null.
+ * Used by the Orders screen "Repeat last order" button to rebuild the cart.
+ * Stale 30s — this is informational; fresh data only matters when user taps.
+ */
+export function useLastPaidWalkIn(tenantId: string | null, branchId: string | null) {
+  return useQuery({
+    queryKey: ['last_paid_walkin', tenantId ?? '', branchId ?? ''],
+    enabled: Boolean(tenantId && branchId),
+    staleTime: 30_000,
+    queryFn: async (): Promise<(OrderRow & { items: OrderItemRow[] }) | null> => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*, order_items(*)')
+        .eq('tenant_id', tenantId)
+        .eq('branch_id', branchId)
+        .is('session_id', null)
+        .eq('status', 'paid')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (error) throw error;
+      if (!data || data.length === 0) return null;
+
+      const row = data[0]!;
+      return {
+        ...row,
+        items: (row.order_items ?? []) as OrderItemRow[],
+      } as OrderRow & { items: OrderItemRow[] };
+    },
+  });
+}
+
 // ─── Mutation: add order (session-attached or walk-in) ───────────────────────
 
 export interface AddOrderInput {

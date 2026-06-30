@@ -27,6 +27,7 @@ import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
+  TextInput,
   View,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -37,13 +38,14 @@ import {
   computeFixedMatchCost,
   computeGrandTotal,
   computePrepaidCost,
+  egpToPiastres,
   elapsedMinutes,
   formatEgp,
   localHm,
   nowIso,
-  reconstructTimeCost,
   toArabicDigits,
   type PlayMode,
+  type RateRule,
   type SegmentPlan,
 } from '@ps/core';
 
@@ -53,6 +55,7 @@ import {
   useSwitchPlayMode,
   useCloseSessionPhase4,
   useIncrementMatchCount,
+  useExtendPrepaid,
   computeLiveOpenMeterWithType,
   type SegmentRow,
   type SessionRow,
@@ -74,7 +77,6 @@ import { supabase } from '../../../src/lib/supabase';
 import { colors, spacing, radius, fontSize, fontWeight, TAP_TARGET } from '../../../src/design/tokens';
 import { AppText } from '../../../src/components/AppText';
 import { Button } from '../../../src/components/Button';
-import { ConfirmDialog } from '../../../src/components/ConfirmDialog';
 import { EmptyState } from '../../../src/components/EmptyState';
 import { ErrorState } from '../../../src/components/ErrorState';
 import { LiveTimer } from '../../../src/components/LiveTimer';
@@ -649,14 +651,18 @@ export default function SessionDetailScreen() {
   const { t } = useTranslation();
   const { claim, user } = useAuth();
 
-  const [confirmCloseVisible, setConfirmCloseVisible] = useState(false);
+  const [closeSheetVisible, setCloseSheetVisible] = useState(false);
   const [confirmSwitchVisible, setConfirmSwitchVisible] = useState(false);
   const [pendingPlayMode, setPendingPlayMode] = useState<PlayMode | null>(null);
   const [closing, setClosing] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [closedAt, setClosedAt] = useState<string | null>(null);
-  // Phase 5: capture payment_method at close for drawer attribution.
+  // Slice 1: close-sheet fields (payment method, discount, cash received).
   const [closePayMethod, setClosePayMethod] = useState<'cash' | 'wallet' | 'other'>('cash');
+  const [closeDiscountEgp, setCloseDiscountEgp] = useState('');
+  const [closeCashReceivedEgp, setCloseCashReceivedEgp] = useState('');
+  // Slice 1: extend prepaid sheet.
+  const [extendSheetVisible, setExtendSheetVisible] = useState(false);
 
   const tenantId = claim?.tenant_id ?? null;
 
@@ -722,13 +728,14 @@ export default function SessionDetailScreen() {
 
   // Derive live totals per billing mode:
   let liveTotalPiastres = 0;
+  let liveTimeCost = 0;  // time portion only (before orders/discount) — used in close sheet
   let liveSegmentPlans: SegmentPlan[] = [];
 
   if (session && !isClosed) {
     if (billingMode === 'open') {
       // Guard: only compute live cost when deviceType is known. If deviceData
       // is loading or errored we show 0 until it resolves (SHOULD-FIX 4).
-      const { grandTotal, segmentPlans } = deviceType
+      const { timeCost, grandTotal, segmentPlans } = deviceType
         ? computeLiveOpenMeterWithType(
             session,
             segments,
@@ -737,29 +744,50 @@ export default function SessionDetailScreen() {
             atIso,
             liveOrdersTotal,
           )
-        : { grandTotal: 0, segmentPlans: [] };
+        : { timeCost: 0, grandTotal: 0, segmentPlans: [] };
+      liveTimeCost = timeCost;
       liveTotalPiastres = grandTotal;
       liveSegmentPlans = segmentPlans;
     } else if (billingMode === 'prepaid') {
+      liveTimeCost = computePrepaidCost({
+        prepaid_total: session.prepaid_total ?? null,
+      });
       liveTotalPiastres = computeGrandTotal({
-        time_total: computePrepaidCost({
-          prepaid_total: session.prepaid_total ?? null,
-        }),
+        time_total: liveTimeCost,
         orders_total: liveOrdersTotal,
         discount: session.discount ?? 0,
       });
     } else if (billingMode === 'fixed_match') {
       const firstSeg = segments[0];
+      liveTimeCost = computeFixedMatchCost({
+        fixed_match_price: firstSeg?.price_per_hour_snapshot ?? 0,
+        match_count: session.match_count ?? 0,
+      });
       liveTotalPiastres = computeGrandTotal({
-        time_total: computeFixedMatchCost({
-          fixed_match_price: firstSeg?.price_per_hour_snapshot ?? 0,
-          match_count: session.match_count ?? 0,
-        }),
+        time_total: liveTimeCost,
         orders_total: liveOrdersTotal,
         discount: session.discount ?? 0,
       });
     }
   }
+
+  // Slice 1: close-sheet derived values.
+  // Discount entered by operator (piastres); clamped to 0 if blank.
+  const closeDiscountPiastres = Math.max(
+    0,
+    Math.round(egpToPiastres(parseFloat(closeDiscountEgp.replace(',', '.')) || 0)),
+  );
+  // Amount due = grand total with the operator-entered discount (clamped ≥ 0 by computeGrandTotal).
+  const closeAmountDue = computeGrandTotal({
+    time_total: liveTimeCost,
+    orders_total: liveOrdersTotal,
+    discount: closeDiscountPiastres,
+  });
+  // Cash received → change due (display only; never persisted).
+  const closeCashReceivedPiastres = Math.round(
+    egpToPiastres(parseFloat(closeCashReceivedEgp.replace(',', '.')) || 0),
+  );
+  const closeChangeDue = Math.max(0, closeCashReceivedPiastres - closeAmountDue);
 
   const displayTotal = isClosed
     ? (session?.grand_total ?? 0)
@@ -777,6 +805,7 @@ export default function SessionDetailScreen() {
 
   const { mutateAsync: switchPlayMode } = useSwitchPlayMode();
   const { mutateAsync: closeSessionPhase4 } = useCloseSessionPhase4();
+  const { mutateAsync: extendPrepaid, isPending: extendingPrepaid, error: extendError } = useExtendPrepaid();
 
   const handleSwitchRequest = (newMode: PlayMode) => {
     // SHOULD-FIX 4: do not allow mode-switch until deviceType is known — planSegments
@@ -825,12 +854,14 @@ export default function SessionDetailScreen() {
         // Phase 5: stamp payment_method and shift_id at close (ADR-0006 Decision 3).
         paymentMethod: closePayMethod,
         shiftId: openShiftData?.id ?? null,
+        // Slice 1: operator-entered discount in piastres.
+        discount: closeDiscountPiastres,
       });
       setClosedAt(endedAt);
-      setConfirmCloseVisible(false);
+      setCloseSheetVisible(false);
       router.back();
     } catch {
-      setConfirmCloseVisible(false);
+      setCloseSheetVisible(false);
     } finally {
       setClosing(false);
     }
@@ -1050,7 +1081,7 @@ export default function SessionDetailScreen() {
           </View>
         )}
 
-        {/* ── Prepaid: locked price reminder ── */}
+        {/* ── Prepaid: locked price reminder + extend button ── */}
         {billingMode === 'prepaid' && (
           <View style={styles.section}>
             <View style={styles.prepaidCard}>
@@ -1064,6 +1095,17 @@ export default function SessionDetailScreen() {
                 <AppText role="caption" color={colors.textFaint}>
                   {toArabicDigits(String(session.prepaid_minutes))} {t('minutes')}
                 </AppText>
+              )}
+              {/* Slice 1: Extend time button — only on open sessions */}
+              {!isClosed && (
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onPress={() => setExtendSheetVisible(true)}
+                  accessibilityLabel={t('session.prepaid.extend.title')}
+                >
+                  {t('session.prepaid.extend.title')}
+                </Button>
               )}
             </View>
           </View>
@@ -1135,7 +1177,11 @@ export default function SessionDetailScreen() {
             size="lg"
             fullWidth
             disabled={billingMode === 'open' && !deviceReady}
-            onPress={() => setConfirmCloseVisible(true)}
+            onPress={() => {
+              setCloseDiscountEgp('');
+              setCloseCashReceivedEgp('');
+              setCloseSheetVisible(true);
+            }}
             accessibilityLabel={t('session.close.confirm')}
           >
             {t('session.close.confirm')}
@@ -1143,18 +1189,194 @@ export default function SessionDetailScreen() {
         </View>
       )}
 
-      {/* ── Confirm: close session ── */}
-      <ConfirmDialog
-        visible={confirmCloseVisible}
+      {/* ── Close session sheet (Slice 1: payment method + discount + change due) ── */}
+      <Sheet
+        visible={closeSheetVisible}
+        onClose={() => setCloseSheetVisible(false)}
         title={t('session.close.summary')}
-        body={formatEgp(displayTotal)}
-        confirmLabel={t('session.close.confirm')}
-        cancelLabel={t('action.cancel')}
-        onConfirm={() => void handleCloseConfirm()}
-        onCancel={() => setConfirmCloseVisible(false)}
-        loading={closing}
-        destructive={false}
-      />
+      >
+        {/* Bill summary */}
+        <View style={styles.closeSummarySheet}>
+          <View style={styles.closeRow}>
+            <AppText role="label" color={colors.textMuted}>{t('session.close.timeCost')}</AppText>
+            <AppText role="label" color={colors.text}>{formatEgp(liveTimeCost)}</AppText>
+          </View>
+          {liveOrdersTotal > 0 && (
+            <View style={styles.closeRow}>
+              <AppText role="label" color={colors.textMuted}>{t('session.close.ordersTotal')}</AppText>
+              <AppText role="label" color={colors.text}>{formatEgp(liveOrdersTotal)}</AppText>
+            </View>
+          )}
+        </View>
+
+        {/* Discount input */}
+        <View style={styles.closeField}>
+          <AppText role="label" color={colors.textMuted}>{t('session.close.discount')}</AppText>
+          <TextInput
+            style={styles.closeInput}
+            value={closeDiscountEgp}
+            onChangeText={setCloseDiscountEgp}
+            placeholder={t('session.close.discountPlaceholder')}
+            placeholderTextColor={colors.textFaint}
+            keyboardType="decimal-pad"
+            accessibilityLabel={t('session.close.discount')}
+          />
+        </View>
+
+        {/* Amount due (live) */}
+        <View style={[styles.closeSummarySheet, styles.closeAmountDue]}>
+          <View style={styles.closeRow}>
+            <AppText role="h3" color={colors.text}>{t('session.close.amountDue')}</AppText>
+            <AppText role="h3" color={colors.primary}>{formatEgp(closeAmountDue)}</AppText>
+          </View>
+        </View>
+
+        {/* Payment method picker */}
+        <AppText role="label" color={colors.textMuted}>{t('session.close.paymentMethod')}</AppText>
+        <SegmentedControl
+          options={[
+            { value: 'cash', label: t('session.close.method.cash') },
+            { value: 'wallet', label: t('session.close.method.wallet') },
+            { value: 'other', label: t('session.close.method.other') },
+          ]}
+          value={closePayMethod}
+          onChange={(v) => setClosePayMethod(v as 'cash' | 'wallet' | 'other')}
+        />
+
+        {/* Cash received + change due (only for cash payments) */}
+        {closePayMethod === 'cash' && (
+          <View style={styles.closeField}>
+            <AppText role="label" color={colors.textMuted}>{t('session.close.cashReceived')}</AppText>
+            <TextInput
+              style={styles.closeInput}
+              value={closeCashReceivedEgp}
+              onChangeText={setCloseCashReceivedEgp}
+              placeholder={formatEgp(closeAmountDue, false)}
+              placeholderTextColor={colors.textFaint}
+              keyboardType="decimal-pad"
+              accessibilityLabel={t('session.close.cashReceived')}
+            />
+            {closeCashReceivedPiastres > 0 && (
+              <View style={styles.closeRow}>
+                <AppText role="label" color={colors.textMuted}>{t('session.close.changeDue')}</AppText>
+                <AppText
+                  role="label"
+                  color={closeChangeDue > 0 ? colors.primary : colors.textMuted}
+                  accessibilityRole="text"
+                >
+                  {formatEgp(closeChangeDue)}
+                </AppText>
+              </View>
+            )}
+          </View>
+        )}
+
+        <Button
+          variant="primary"
+          size="lg"
+          fullWidth
+          loading={closing}
+          onPress={() => void handleCloseConfirm()}
+          accessibilityLabel={t('session.close.confirm')}
+        >
+          {t('session.close.confirm')}
+        </Button>
+        <Button
+          variant="ghost"
+          size="lg"
+          fullWidth
+          onPress={() => setCloseSheetVisible(false)}
+          accessibilityLabel={t('action.cancel')}
+        >
+          {t('action.cancel')}
+        </Button>
+      </Sheet>
+
+      {/* ── Extend prepaid sheet (Slice 1: pick a block to accumulate) ── */}
+      <Sheet
+        visible={extendSheetVisible}
+        onClose={() => setExtendSheetVisible(false)}
+        title={t('session.prepaid.extend.title')}
+      >
+        {(() => {
+          // Filter rate rules: billing_mode='prepaid', matching device_type (or 'any'), with block fields.
+          const prepaidBlocks = rateRules.filter(
+            (r) =>
+              r.billing_mode === 'prepaid' &&
+              (r.device_type === deviceType || r.device_type === 'any') &&
+              r.block_minutes != null &&
+              r.block_price != null,
+          );
+
+          if (prepaidBlocks.length === 0) {
+            return (
+              <AppText role="body" color={colors.textMuted} align="center">
+                {t('session.prepaid.extend.none')}
+              </AppText>
+            );
+          }
+
+          return (
+            <View style={styles.extendBlockList}>
+              {prepaidBlocks.map((rule) => (
+                <Pressable
+                  key={rule.id}
+                  style={({ pressed }) => [
+                    styles.extendBlockRow,
+                    pressed && styles.extendBlockRowPressed,
+                  ]}
+                  onPress={() => {
+                    if (!session || !tenantId || !user || extendingPrepaid) return;
+                    void extendPrepaid({
+                      sessionId: session.id,
+                      tenantId,
+                      branchId: session.branch_id,
+                      managerId: user.id,
+                      currentPrepaidTotal: session.prepaid_total ?? 0,
+                      currentPrepaidMinutes: session.prepaid_minutes ?? null,
+                      blockPrice: rule.block_price!,
+                      blockMinutes: rule.block_minutes!,
+                    }).then(() => {
+                      setExtendSheetVisible(false);
+                    }).catch(() => {
+                      // error surfaced via extendError below
+                    });
+                  }}
+                  disabled={extendingPrepaid}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('session.prepaid.extend.block', {
+                    minutes: toArabicDigits(String(rule.block_minutes)),
+                    price: formatEgp(rule.block_price!, false),
+                  })}
+                >
+                  <View style={styles.extendBlockLeft}>
+                    <AppText role="label" color={colors.text}>
+                      {toArabicDigits(String(rule.block_minutes))} {t('minutes')}
+                    </AppText>
+                  </View>
+                  <AppText role="h3" color={colors.primary}>
+                    {formatEgp(rule.block_price!)}
+                  </AppText>
+                </Pressable>
+              ))}
+              {extendError != null && (
+                <AppText role="caption" color={colors.danger} align="center" accessibilityRole="text">
+                  {t('session.prepaid.extend.error')}
+                </AppText>
+              )}
+            </View>
+          );
+        })()}
+        <Button
+          variant="ghost"
+          size="lg"
+          fullWidth
+          onPress={() => setExtendSheetVisible(false)}
+          accessibilityLabel={t('action.cancel')}
+        >
+          {t('action.cancel')}
+        </Button>
+      </Sheet>
 
       {/* ── Confirm: switch play mode ── */}
       <Sheet
@@ -1312,5 +1534,58 @@ const styles = StyleSheet.create({
   deviceWarning: {
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.xs,
+  },
+  // ── Close sheet styles ──
+  closeSummarySheet: {
+    backgroundColor: colors.surface2,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: spacing.xs,
+  },
+  closeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  closeAmountDue: {
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  closeField: {
+    gap: spacing.xs,
+  },
+  closeInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    color: colors.text,
+    fontSize: fontSize.body,
+    minHeight: TAP_TARGET,
+  },
+  // ── Extend prepaid sheet styles ──
+  extendBlockList: {
+    gap: spacing.sm,
+  },
+  extendBlockRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: colors.surface2,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    minHeight: TAP_TARGET,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  extendBlockRowPressed: {
+    backgroundColor: colors.surface3,
+  },
+  extendBlockLeft: {
+    flex: 1,
+    gap: spacing['2xs'],
   },
 });
