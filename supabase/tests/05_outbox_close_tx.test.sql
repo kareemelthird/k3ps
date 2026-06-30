@@ -1,4 +1,4 @@
--- =============================================================================
+﻿-- =============================================================================
 -- 05_outbox_close_tx.test.sql — pgTAP proof for migration 0009 (ADR-0009)
 --
 -- Proves four guarantees introduced by migration 0009:
@@ -208,7 +208,8 @@ select lives_ok(
       "amount":    6000,
       "meta":      {"billing_mode":"open","time_total":6000},
       "created_at":"2026-06-26T10:00:00+00:00"
-    }'::jsonb
+    }'::jsonb,
+    NULL::jsonb  -- p_debt: non-debt close (migration 0019)
   ) $$,
   'close_session_tx: first call succeeds (no exception)');
 
@@ -329,7 +330,8 @@ select lives_ok(
       "amount":    6000,
       "meta":      {"billing_mode":"open","time_total":6000},
       "created_at":"2026-06-26T10:00:00+00:00"
-    }'::jsonb
+    }'::jsonb,
+    NULL::jsonb  -- p_debt: non-debt close (migration 0019)
   ) $$,
   'close_session_tx: second call (replay) succeeds — no error, no duplicate');
 
@@ -509,7 +511,8 @@ select throws_ok(
       "amount":    7000,
       "meta":      {},
       "created_at":"2026-06-26T10:00:00+00:00"
-    }'::jsonb
+    }'::jsonb,
+    NULL::jsonb  -- p_debt: non-debt close (migration 0019)
   ) $$,
   '42501', null,
   'close_session_tx: cross-tenant call (tenant_id=B) rejected by RLS WITH CHECK (42501)');
@@ -668,7 +671,8 @@ select lives_ok(
       "amount":    7500,
       "meta":      {"billing_mode":"open","time_total":6000,"orders_total":1500},
       "created_at":"2026-06-26T10:00:00+00:00"
-    }'::jsonb
+    }'::jsonb,
+    NULL::jsonb  -- p_debt: non-debt close (migration 0019)
   ) $$,
   'close_session_tx (0013): call with orders_total in patch succeeds');
 
@@ -771,7 +775,8 @@ select throws_ok(
       "amount":    3000,
       "meta":      {},
       "created_at":"2026-06-26T11:00:00+00:00"
-    }'::jsonb
+    }'::jsonb,
+    NULL::jsonb  -- p_debt: non-debt close (migration 0019)
   ) $$,
   '42501', null,
   'close_session_tx (0014): p_tenant_id=A but p_audit.tenant_id=B rejected by per-row payload pin (42501)');
@@ -849,7 +854,8 @@ select throws_ok(
       "amount":    3000,
       "meta":      {},
       "created_at":"2026-06-26T11:00:00+00:00"
-    }'::jsonb
+    }'::jsonb,
+    NULL::jsonb  -- p_debt: non-debt close (migration 0019)
   ) $$,
   '42501', null,
   'close_session_tx (0014): p_tenant_id=A but p_movements.tenant_id=B rejected by per-row payload pin (42501)');
@@ -916,7 +922,8 @@ select throws_ok(
       "amount":    3000,
       "meta":      {},
       "created_at":"2026-06-26T11:00:00+00:00"
-    }'::jsonb
+    }'::jsonb,
+    NULL::jsonb  -- p_debt: non-debt close (migration 0019)
   ) $$,
   '42501', null,
   'close_session_tx (0014): p_tenant_id=A but p_segments.tenant_id=B rejected by per-row payload pin (42501)');
@@ -1028,7 +1035,8 @@ select lives_ok(
       "amount":    5000,
       "meta":      {"billing_mode":"open","time_total":6000,"discount":1000},
       "created_at":"2026-06-26T14:00:00+00:00"
-    }'::jsonb
+    }'::jsonb,
+    NULL::jsonb  -- p_debt: non-debt close (migration 0019)
   ) $$,
   'close_session_tx (0016): close with non-zero discount succeeds');
 

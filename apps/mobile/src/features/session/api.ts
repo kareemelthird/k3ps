@@ -333,6 +333,36 @@ export function useSwitchPlayMode() {
 
 // ─── Mutation: close session ──────────────────────────────────────────────────
 
+/**
+ * Debt row payload for a debt-tender close (ADR-0012 Slice 3, migration 0019).
+ * The client generates a deterministic UUID (uuidv5('debt:{sessionId}', NS))
+ * so that a retry of the same close maps to the same debts row and the
+ * ON CONFLICT DO NOTHING in close_session_tx makes the write idempotent.
+ *
+ * All money fields are integer piastres. tenant_id MUST equal the session's
+ * tenant_id; the DB enforces this via guard 0c (42501 on mismatch).
+ */
+export interface DebtClosePayload {
+  /** Deterministic debt id: uuidv5('debt:{sessionId}', PS_UUID_NS). */
+  id: string;
+  /** Must equal CloseSessionPhase4Input.tenantId (guard 0c enforces at DB). */
+  tenant_id: string;
+  /** Optional linked customer id; null for anonymous debt. */
+  customer_id: string | null;
+  /** Display name shown on the debt ledger (required). */
+  customer_name: string;
+  /** Amount owed in piastres; equals grand_total at close time. */
+  amount: number;
+  /** Session the debt was created for (for reconciliation). */
+  session_id: string | null;
+  /** Staff member who accepted the debt (actor_id of the close). */
+  manager_id: string;
+  /** Shift id at the time of close, if a shift is open; otherwise null. */
+  shift_id: string | null;
+  /** Free-text note (optional). */
+  note: string | null;
+}
+
 export interface CloseSessionPhase4Input {
   sessionId: string;
   deviceId: string;
@@ -345,10 +375,11 @@ export interface CloseSessionPhase4Input {
   /** Device type for planSegments rule resolution. */
   deviceType: string;
   /**
-   * Phase 5: Payment method captured at close (cash/wallet/other).
-   * Used to attribute cash sales to the shift drawer.
+   * Phase 5 + Slice 3: Payment method captured at close.
+   * Use 'debt' for آجل (deferred payment); requires `debt` field to be set.
+   * Used to attribute cash sales to the shift drawer and to fold debt rows.
    */
-  paymentMethod?: 'cash' | 'wallet' | 'other';
+  paymentMethod?: 'cash' | 'wallet' | 'other' | 'debt';
   /**
    * Phase 5: Open shift id to stamp on the session row at close.
    * null if no shift is open.
@@ -359,6 +390,13 @@ export interface CloseSessionPhase4Input {
    * Overrides session.discount (which is always 0 until the operator sets it here).
    */
   discount?: number;
+  /**
+   * Slice 3: Debt row to create atomically inside close_session_tx.
+   * Required when paymentMethod='debt'; must be null/absent for all other methods.
+   * The DB enforces this via guard 0e (42501 if payment_method='debt' + p_debt=null).
+   * Construct with DebtClosePayload; id must be deterministic (uuidv5-keyed).
+   */
+  debt?: DebtClosePayload | null;
 }
 
 /**
@@ -602,6 +640,9 @@ export function useCloseSessionPhase4() {
             },
             created_at: now,
           },
+          // Slice 3 (migration 0019): debt row folded atomically into the close TX.
+          // null for all non-debt closes; guard 0e (DB) rejects debt + null combo.
+          p_debt: input.debt ?? null,
         } as Record<string, unknown>,
         conflict: 'merge',
       });
