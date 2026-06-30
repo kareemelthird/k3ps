@@ -85,6 +85,14 @@ export default function OperateLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="debts"
+        options={{
+          tabBarLabel: ({ focused }) => (
+            <TabLabel label={t('nav.debts')} focused={focused} />
+          ),
+        }}
+      />
       {/* Session detail stays as a full-screen modal pushed from devices */}
       <Tabs.Screen
         name="session/[id]"

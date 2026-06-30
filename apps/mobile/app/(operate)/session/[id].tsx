@@ -43,7 +43,9 @@ import {
   formatEgp,
   localHm,
   nowIso,
+  PS_UUID_NS,
   toArabicDigits,
+  uuidv5,
   type PlayMode,
   type RateRule,
   type SegmentPlan,
@@ -57,10 +59,12 @@ import {
   useIncrementMatchCount,
   useExtendPrepaid,
   computeLiveOpenMeterWithType,
+  type DebtClosePayload,
   type SegmentRow,
   type SessionRow,
 } from '../../../src/features/session/api';
 import { useAuth } from '../../../src/stores/useAuth';
+import { useCustomers } from '../../../src/features/debts/api';
 import { useOpenShift } from '../../../src/features/shifts/api';
 import {
   useProducts,
@@ -672,9 +676,8 @@ export default function SessionDetailScreen() {
   const perms = useMyPermissions();
   const canVoid     = perms.can('can_void');
   const canDiscount = perms.can('can_discount');
-  // can_manage_debts — Slice 3 guard point (debt close + آجل repayment):
-  //   gate the 'debt' payment option and debt-payment recording with:
-  //   perms.can('can_manage_debts')
+  // can_manage_debts — Slice 3: gates the 'debt' payment option in close sheet.
+  const canManageDebts = perms.can('can_manage_debts');
 
   const [closeSheetVisible, setCloseSheetVisible] = useState(false);
   const [confirmSwitchVisible, setConfirmSwitchVisible] = useState(false);
@@ -683,9 +686,15 @@ export default function SessionDetailScreen() {
   const [switching, setSwitching] = useState(false);
   const [closedAt, setClosedAt] = useState<string | null>(null);
   // Slice 1: close-sheet fields (payment method, discount, cash received).
-  const [closePayMethod, setClosePayMethod] = useState<'cash' | 'wallet' | 'other'>('cash');
+  // Slice 3: 'debt' added; canManageDebts gates its visibility.
+  const [closePayMethod, setClosePayMethod] = useState<'cash' | 'wallet' | 'other' | 'debt'>('cash');
   const [closeDiscountEgp, setCloseDiscountEgp] = useState('');
   const [closeCashReceivedEgp, setCloseCashReceivedEgp] = useState('');
+  // Slice 3: debt customer picker state.
+  const [closeDebtSearch, setCloseDebtSearch] = useState('');
+  const [closeDebtCustomerId, setCloseDebtCustomerId] = useState<string | null>(null);
+  const [closeDebtCustomerName, setCloseDebtCustomerName] = useState('');
+  const [closeDebtNameError, setCloseDebtNameError] = useState(false);
   // Slice 1: extend prepaid sheet.
   const [extendSheetVisible, setExtendSheetVisible] = useState(false);
 
@@ -826,6 +835,12 @@ export default function SessionDetailScreen() {
   const sessionBranchId = sessionData?.session.branch_id ?? null;
   const { data: openShiftData } = useOpenShift(tenantId, sessionBranchId);
 
+  // Slice 3: customer search for the debt payment option in the close sheet.
+  // Only enabled when the close sheet is open and 'debt' is selected — no wasted requests.
+  const { data: debtCustomerResults = [] } = useCustomers(closeDebtSearch, {
+    enabled: closeSheetVisible && closePayMethod === 'debt',
+  });
+
   // ── Mutations ─────────────────────────────────────────────────────────────
 
   const { mutateAsync: switchPlayMode } = useSwitchPlayMode();
@@ -863,8 +878,37 @@ export default function SessionDetailScreen() {
   const handleCloseConfirm = async () => {
     // SHOULD-FIX 4: guard deviceType — never pass null/wildcard to planSegments.
     if (!session || !tenantId || !user || !deviceId || !deviceType) return;
+
+    // Slice 3: customer name is required for debt closes.
+    if (closePayMethod === 'debt') {
+      const name = closeDebtCustomerName.trim();
+      if (!name) {
+        setCloseDebtNameError(true);
+        return;
+      }
+    }
+    setCloseDebtNameError(false);
+
     setClosing(true);
     const endedAt = nowIso();
+
+    // Slice 3: build the debt payload for آجل closes (guard 0e: DB rejects debt=null + method='debt').
+    let debtPayload: DebtClosePayload | null = null;
+    if (closePayMethod === 'debt') {
+      const debtId = uuidv5(`debt:${session.id}`, PS_UUID_NS);
+      debtPayload = {
+        id: debtId,
+        tenant_id: tenantId,
+        customer_id: closeDebtCustomerId,
+        customer_name: closeDebtCustomerName.trim(),
+        amount: closeAmountDue,
+        session_id: session.id,
+        manager_id: user.id,
+        shift_id: openShiftData?.id ?? null,
+        note: null,
+      };
+    }
+
     try {
       await closeSessionPhase4({
         sessionId: session.id,
@@ -881,9 +925,15 @@ export default function SessionDetailScreen() {
         shiftId: openShiftData?.id ?? null,
         // Slice 1: operator-entered discount in piastres.
         discount: closeDiscountPiastres,
+        // Slice 3: debt row (null for cash/wallet/other).
+        debt: debtPayload,
       });
       setClosedAt(endedAt);
       setCloseSheetVisible(false);
+      // Reset debt picker state for next open.
+      setCloseDebtSearch('');
+      setCloseDebtCustomerId(null);
+      setCloseDebtCustomerName('');
       router.back();
     } catch {
       setCloseSheetVisible(false);
@@ -1206,6 +1256,10 @@ export default function SessionDetailScreen() {
             onPress={() => {
               setCloseDiscountEgp('');
               setCloseCashReceivedEgp('');
+              setCloseDebtSearch('');
+              setCloseDebtCustomerId(null);
+              setCloseDebtCustomerName('');
+              setCloseDebtNameError(false);
               setCloseSheetVisible(true);
             }}
             accessibilityLabel={t('session.close.confirm')}
@@ -1274,17 +1328,77 @@ export default function SessionDetailScreen() {
           </View>
         </View>
 
-        {/* Payment method picker */}
+        {/* Payment method picker — 'debt' option only shown when can_manage_debts */}
         <AppText role="label" color={colors.textMuted}>{t('session.close.paymentMethod')}</AppText>
         <SegmentedControl
           options={[
             { value: 'cash', label: t('session.close.method.cash') },
             { value: 'wallet', label: t('session.close.method.wallet') },
             { value: 'other', label: t('session.close.method.other') },
+            ...(canManageDebts
+              ? [{ value: 'debt', label: t('session.close.method.debt') }]
+              : []),
           ]}
           value={closePayMethod}
-          onChange={(v) => setClosePayMethod(v as 'cash' | 'wallet' | 'other')}
+          onChange={(v) => {
+            setClosePayMethod(v as 'cash' | 'wallet' | 'other' | 'debt');
+            setCloseDebtNameError(false);
+          }}
         />
+
+        {/* Debt customer picker — only shown when 'debt' is selected */}
+        {closePayMethod === 'debt' && (
+          <View style={styles.closeField}>
+            <AppText role="label" color={colors.textMuted}>
+              {t('session.close.debtCustomer.label')}
+            </AppText>
+            <TextInput
+              style={[styles.closeInput, closeDebtNameError && { borderColor: colors.danger }]}
+              value={closeDebtSearch || closeDebtCustomerName}
+              onChangeText={(text) => {
+                setCloseDebtSearch(text);
+                setCloseDebtCustomerName(text);
+                // Clear selection if user types after selecting
+                setCloseDebtCustomerId(null);
+                setCloseDebtNameError(false);
+              }}
+              placeholder={t('session.close.debtCustomer.placeholder')}
+              placeholderTextColor={colors.textFaint}
+              accessibilityLabel={t('session.close.debtCustomer.label')}
+              autoCapitalize="words"
+              returnKeyType="search"
+            />
+            {closeDebtNameError && (
+              <AppText role="micro" color={colors.danger}>
+                {t('session.close.debtCustomer.required')}
+              </AppText>
+            )}
+            {/* Customer search results */}
+            {debtCustomerResults.length > 0 && !closeDebtCustomerId && (
+              <View style={styles.debtCustomerList}>
+                {debtCustomerResults.slice(0, 5).map((c) => (
+                  <Pressable
+                    key={c.id}
+                    style={styles.debtCustomerRow}
+                    onPress={() => {
+                      setCloseDebtCustomerId(c.id);
+                      setCloseDebtCustomerName(c.name);
+                      setCloseDebtSearch('');
+                      setCloseDebtNameError(false);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={c.name}
+                  >
+                    <AppText role="label" color={colors.text}>{c.name}</AppText>
+                    {c.phone && (
+                      <AppText role="micro" color={colors.textFaint}>{c.phone}</AppText>
+                    )}
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Cash received + change due (only for cash payments) */}
         {closePayMethod === 'cash' && (
@@ -1612,6 +1726,23 @@ const styles = StyleSheet.create({
   closeInputLocked: {
     opacity: 0.45,
     backgroundColor: colors.surface3,
+  },
+  // ── Debt customer picker styles ──
+  debtCustomerList: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+    backgroundColor: colors.surface2,
+  },
+  debtCustomerRow: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    minHeight: TAP_TARGET,
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    gap: spacing['2xs'],
   },
   // ── Extend prepaid sheet styles ──
   extendBlockList: {

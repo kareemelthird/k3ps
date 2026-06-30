@@ -99,12 +99,23 @@
       "method": {
         "cash": "نقدي",
         "wallet": "محفظة",
-        "other": "أخرى"
+        "other": "أخرى",
+        "debt": "آجل"
       },
       "discount": "خصم (ج.م)",
       "discountPlaceholder": "٠",
       "cashReceived": "نقد مستلم",
-      "changeDue": "الباقي للعميل"
+      "changeDue": "الباقي للعميل",
+      "debtCustomer": {
+        "label": "اسم العميل",
+        "placeholder": "ابحث أو أدخل اسم",
+        "required": "اسم العميل مطلوب للدفع الآجل",
+        "select": "اختر أو اكتب اسم العميل"
+      },
+      "debtNote": {
+        "label": "ملاحظة (اختياري)",
+        "placeholder": "ملاحظة على الدين"
+      }
     },
     "prepaid": {
       "remaining": "{{minutes}} دقيقة متبقية",
@@ -373,12 +384,49 @@
     "devices": "الأجهزة",
     "orders": "الطلبات",
     "stock": "المخزون",
-    "shift": "الوردية"
+    "shift": "الوردية",
+    "debts": "آجل"
   },
   "permissions": {
     "noVoid": "لا تملك صلاحية إلغاء العمليات",
     "noDiscount": "لا تملك صلاحية تطبيق الخصم",
     "noRestock": "لا تملك صلاحية استلام المخزون",
     "noDebts": "لا تملك صلاحية إدارة الديون"
+  },
+  "debts": {
+    "title": "دفتر الآجل",
+    "empty": {
+      "title": "لا توجد ديون مفتوحة",
+      "body": "جميع الجلسات مدفوعة"
+    },
+    "summary": {
+      "outstanding": "إجمالي المستحق",
+      "debtors": "{{countDisplay}} مدين"
+    },
+    "card": {
+      "amount": "المبلغ الأصلي",
+      "paid": "المدفوع",
+      "remaining": "المتبقي",
+      "createdAt": "تاريخ الدين",
+      "session": "الجلسة"
+    },
+    "status": {
+      "open": "مفتوح",
+      "partially_paid": "مسدد جزئياً",
+      "settled": "مسدد"
+    },
+    "settle": {
+      "title": "تسجيل دفعة",
+      "amount": "المبلغ المدفوع",
+      "fullSettle": "سداد كامل",
+      "confirm": "تأكيد الدفعة",
+      "error": "فشل تسجيل الدفعة — حاول مرة أخرى",
+      "errorRejected": "لا تملك صلاحية تسجيل الدفعة لهذا الدين",
+      "amountRequired": "يرجى إدخال مبلغ صحيح",
+      "noPermission": "لا تملك صلاحية تسجيل مدفوعات الديون"
+    },
+    "error": {
+      "load": "فشل تحميل الديون — حاول مرة أخرى"
+    }
   }
 }
