@@ -62,6 +62,8 @@ const config: Config = {
         'status-free': '#10B981',
         'status-busy': '#3B82F6',
         'status-maint': '#64748B',
+        // Semantic state tokens — used as bg-success/10, text-success, border-success/30, etc.
+        success: '#10B981', // G500 green — matches status-free (both signal "OK / live")
         warning: '#F59E0B',
         danger: '#EF4444',
         info: '#3B82F6',

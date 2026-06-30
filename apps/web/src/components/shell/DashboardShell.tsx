@@ -28,6 +28,8 @@ export function DashboardShell() {
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
   const [branchesLoading, setBranchesLoading] = useState(true);
   const [branchesError, setBranchesError] = useState<string | null>(null);
+  // Tenant display name — fetched from public.tenants; falls back to app.name
+  const [tenantName, setTenantName] = useState<string | undefined>(undefined);
 
   // Redirect to login if no auth claim
   useEffect(() => {
@@ -76,6 +78,26 @@ export function DashboardShell() {
     void fetchBranches();
   }, [fetchBranches]);
 
+  // Fetch tenant display name — non-blocking
+  useEffect(() => {
+    if (!claim?.tenant_id) return;
+    const supabase = getBrowserClient();
+    void (async () => {
+      try {
+        const { data } = await supabase
+          .from('tenants')
+          .select('name')
+          .eq('id', claim.tenant_id)
+          .maybeSingle();
+        if (data && (data as { name: string }).name) {
+          setTenantName((data as { name: string }).name);
+        }
+      } catch {
+        // Non-blocking — TopBar falls back to app.name
+      }
+    })();
+  }, [claim?.tenant_id]);
+
   function handleBranchSelect(id: string | null) {
     setActiveBranchId(id);
     if (id) localStorage.setItem(BRANCH_STORAGE_KEY, id);
@@ -97,7 +119,7 @@ export function DashboardShell() {
   return (
     <div className="min-h-dvh bg-bg text-text">
       <TopBar
-        tenantName={claim.tenant_id ?? undefined}
+        tenantName={tenantName}
         branches={branches}
         activeBranchId={activeBranchId}
         onBranchSelect={handleBranchSelect}

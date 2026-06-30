@@ -32,6 +32,8 @@ export function DashboardPageShell({ children }: DashboardPageShellProps) {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
   const [subSnapshot, setSubSnapshot] = useState<SubscriptionSnapshot | null | undefined>(undefined);
+  // Tenant display name — fetched from public.tenants; falls back to app.name until loaded
+  const [tenantName, setTenantName] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     if (!authLoading && !claim) {
@@ -60,11 +62,12 @@ export function DashboardPageShell({ children }: DashboardPageShellProps) {
     if (!claim?.tenant_id) return;
     try {
       const supabase = getBrowserClient();
+      // maybeSingle() avoids 406 when the subscription row doesn't exist yet
       const { data } = await supabase
         .from('subscriptions')
         .select('status, plan, comped, trial_end, current_period_end, cancel_at_period_end')
         .eq('tenant_id', claim.tenant_id)
-        .single();
+        .maybeSingle();
       if (data) {
         const row = data as {
           status: SubscriptionSnapshot['status'];
@@ -91,10 +94,29 @@ export function DashboardPageShell({ children }: DashboardPageShellProps) {
     }
   }, [claim?.tenant_id]);
 
+  const fetchTenantName = useCallback(async () => {
+    if (!claim?.tenant_id) return;
+    try {
+      const supabase = getBrowserClient();
+      // RLS: tenants are readable by their own members (policy tenants_member_select).
+      const { data } = await supabase
+        .from('tenants')
+        .select('name')
+        .eq('id', claim.tenant_id)
+        .maybeSingle();
+      if (data && (data as { name: string }).name) {
+        setTenantName((data as { name: string }).name);
+      }
+    } catch {
+      // Non-blocking — TopBarSimple falls back to t('app.name')
+    }
+  }, [claim?.tenant_id]);
+
   useEffect(() => {
     void fetchBranches();
     void fetchSubscription();
-  }, [fetchBranches, fetchSubscription]);
+    void fetchTenantName();
+  }, [fetchBranches, fetchSubscription, fetchTenantName]);
 
   if (authLoading) {
     return (
@@ -124,7 +146,7 @@ export function DashboardPageShell({ children }: DashboardPageShellProps) {
   return (
     <div className="min-h-dvh bg-bg text-text">
       <TopBarSimple
-        tenantName={claim.tenant_id ?? undefined}
+        tenantName={tenantName}
         branches={branches}
         activeBranchId={activeBranchId}
         onBranchSelect={(id) => setActiveBranchId(id)}

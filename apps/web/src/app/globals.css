@@ -75,6 +75,16 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Hide scrollbar while keeping scroll functionality — used on the nav bar
+   to prevent horizontal overflow from creating a page-level scrollbar. */
+.scrollbar-none {
+  -ms-overflow-style: none;  /* IE / Edge */
+  scrollbar-width: none;     /* Firefox */
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;             /* Chrome / Safari / Opera */
+}
+
 /* Reduced motion: disable animations globally */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

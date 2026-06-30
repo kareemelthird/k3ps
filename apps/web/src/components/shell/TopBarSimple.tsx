@@ -63,9 +63,11 @@ export function TopBarSimple({
         </span>
       </div>
 
-      {/* Center: nav links */}
+      {/* Center: nav links — overflow-x-auto prevents the sticky header from
+          expanding beyond the viewport and triggering a horizontal scrollbar
+          that would push the max-w-7xl main content out of the visible area. */}
       <nav
-        className="flex items-center gap-xs flex-1"
+        className="flex items-center gap-xs flex-1 overflow-x-auto scrollbar-none min-w-0"
         aria-label={t('nav.dashboard')}
       >
         {navItems.map((item) => {

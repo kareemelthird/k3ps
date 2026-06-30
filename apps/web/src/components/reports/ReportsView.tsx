@@ -163,11 +163,13 @@ export function ReportsView() {
 
         // Parallel: settings + branches
         const [settingsResult, branchesResult] = await Promise.all([
+          // maybeSingle() avoids 406 when the business_day settings row doesn't
+          // exist for this tenant; the caller defaults to DEFAULT_CUTOVER_HOUR.
           supabase
             .from('settings')
             .select('value')
             .eq('key', 'business_day')
-            .single(),
+            .maybeSingle(),
           supabase
             .from('branches')
             .select('*')
