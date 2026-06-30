@@ -33,4 +33,6 @@ export * from './reports';
 export * from './outbox';
 export * from './entitlements';
 export * from './observability';
+export * from './permissions';
+export * from './settings';
 export * from './types';

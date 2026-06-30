@@ -82,6 +82,12 @@ export interface TenantMember {
   profile_id: string;
   role: Exclude<Role, 'super_admin'>; // super_admin is a platform flag, not a tenant membership
   is_active: boolean;
+  /**
+   * Per-staff permission flags stored as JSONB on tenant_members (ADR-0012 Slice 2).
+   * Absent key ⇒ allowed (permissive default). Explicit false ⇒ denied.
+   * Use resolveStaffPermissions() from @ps/core/permissions to resolve into typed booleans.
+   */
+  permissions: Record<string, boolean>;
   created_at: string;
   updated_at: string;
 }

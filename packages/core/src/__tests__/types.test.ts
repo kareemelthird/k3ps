@@ -91,6 +91,7 @@ describe('TenantMember entity shape', () => {
       profile_id: 'user-1',
       role: 'owner',
       is_active: true,
+      permissions: {},
       created_at: '2026-01-01T00:00:00.000Z',
       updated_at: '2026-01-01T00:00:00.000Z',
     };

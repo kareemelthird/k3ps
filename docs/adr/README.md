@@ -17,6 +17,7 @@ One ADR per significant, hard-to-reverse design choice. Accepted ADRs are never 
 | [0009](0009-offline-outbox-and-realtime.md) | Offline outbox and realtime sync — pure-core state machine, crash-safe persistence, dependency-ordered drain, tenant-scoped realtime, `close_session_tx` SECURITY INVOKER RPC | Accepted | 8 |
 | [0010](0010-saas-billing-stripe.md) | SaaS billing — Stripe subscriptions, entitlements in `@ps/core`, webhook trust boundary, `stripe_events` dedupe, service-role-only RPCs | Accepted | 9 |
 | [0011](0011-production-hardening-observability.md) | Production hardening — DSN-gated Sentry observability, pure `@ps/core` scrubber with `SAFE_TAG_KEYS` allowlist, `audit_config_change()` SECURITY INVOKER trigger (completes §2.7), EAS build profiles, perf/a11y/security gates | Accepted | 10 |
+| [0012](0012-staff-permissions-settings-and-debts.md) | Staff provisioning (`invite-staff` edge fn) + per-staff `permissions jsonb` on `tenant_members` + `has_permission()` RLS gate + KV-reuse for tenant settings + customer debts (آجل) via existing tables/`'debt'` enum + debt creation folded into `close_session_tx` | Proposed | — |
 
 ## Conventions
 
