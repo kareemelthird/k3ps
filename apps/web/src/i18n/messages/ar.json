@@ -266,7 +266,9 @@
     "rateRules": "قواعد الأسعار",
     "products": "قائمة المنتجات",
     "reports": "التقارير",
-    "billing": "الفوترة"
+    "billing": "الفوترة",
+    "staff": "الموظفون",
+    "settings": "الإعدادات"
   },
   "products": {
     "title": "قائمة المنتجات",
@@ -818,6 +820,111 @@
       "generic": "حدث خطأ",
       "loadFailed": "حدث خطأ في التحميل",
       "endSession": "حدث خطأ في إنهاء الجلسة"
+    }
+  },
+  "staff": {
+    "title": "الموظفون",
+    "subtitle": "إدارة أعضاء الفريق وصلاحياتهم",
+    "invite": "دعوة موظف",
+    "edit": "تعديل الصلاحيات",
+    "denied": {
+      "title": "الوصول مقيد",
+      "body": "إدارة الموظفين متاحة للمالك فقط",
+      "backToDashboard": "العودة للوحة التحكم"
+    },
+    "empty": {
+      "title": "لا يوجد موظفون",
+      "body": "ادعُ موظفاً لمنحه صلاحية الوصول للنظام"
+    },
+    "field": {
+      "email": "البريد الإلكتروني",
+      "emailHelper": "يُستخدم لتسجيل الدخول",
+      "fullName": "الاسم الكامل (اختياري)",
+      "role": "الدور",
+      "isActive": "نشط",
+      "permissions": "الصلاحيات"
+    },
+    "role": {
+      "owner": "مالك",
+      "manager": "مدير",
+      "staff": "موظف"
+    },
+    "perm": {
+      "can_restock": "إعادة التخزين",
+      "can_void": "إلغاء الطلبات والجلسات",
+      "can_manage_debts": "إدارة الآجل",
+      "can_discount": "منح خصومات"
+    },
+    "permHint": "الصلاحيات غير المحددة ستُطبَّق بشكل افتراضي (مسموح)",
+    "action": {
+      "save": "حفظ",
+      "cancel": "إلغاء",
+      "invite": "دعوة",
+      "activate": "تفعيل",
+      "deactivate": "إلغاء التفعيل"
+    },
+    "validation": {
+      "emailRequired": "البريد الإلكتروني مطلوب",
+      "emailInvalid": "صيغة البريد الإلكتروني غير صحيحة",
+      "permissionsInvalid": "الصلاحيات غير صحيحة — تحقق من البيانات"
+    },
+    "tempPassword": {
+      "title": "كلمة المرور المؤقتة",
+      "body": "سلّم هذه الكلمة للموظف الآن — لن تُعرض مجدداً",
+      "label": "كلمة المرور المؤقتة",
+      "copy": "نسخ",
+      "copied": "تم النسخ",
+      "close": "تم الحفظ، إغلاق"
+    },
+    "existingUser": "المستخدم موجود مسبقاً — تم تحديث عضويته",
+    "ownerReadOnly": "مالك الحساب — لا يمكن تعديل الدور",
+    "filter": {
+      "allRoles": "كل الأدوار",
+      "allStatuses": "كل الحالات",
+      "active": "نشط",
+      "inactive": "غير نشط"
+    }
+  },
+  "settings": {
+    "title": "الإعدادات",
+    "subtitle": "إعدادات المقهى والتشغيل",
+    "denied": {
+      "title": "الوصول مقيد",
+      "body": "الإعدادات متاحة للمالك فقط",
+      "backToDashboard": "العودة للوحة التحكم"
+    },
+    "section": {
+      "businessDay": "يوم العمل",
+      "businessDayDesc": "الساعة التي يبدأ منها يوم عمل جديد في التقارير",
+      "inventory": "المخزون",
+      "inventoryDesc": "حد التنبيه بنقص المخزون",
+      "peakWindows": "أوقات الذروة",
+      "peakWindowsDesc": "النوافذ الزمنية للأسعار المرتفعة (توقيت القاهرة)",
+      "display": "عرض المقهى"
+    },
+    "field": {
+      "cutoverHour": "ساعة بدء يوم العمل (٠–٢٣)",
+      "cutoverHourHelper": "الساعة بتوقيت القاهرة — يُستخدم في التقارير اليومية",
+      "lowStockThreshold": "حد التنبيه المنخفض للمخزون",
+      "lowStockThresholdHelper": "عند هذه الكمية أو أقل يُعد المخزون منخفضاً",
+      "peakStart": "بداية الذروة (HH:mm)",
+      "peakEnd": "نهاية الذروة (HH:mm)",
+      "cafeName": "اسم العرض للمقهى",
+      "cafeNameHelper": "اسم مخصص يظهر في التقارير — اختياري"
+    },
+    "action": {
+      "save": "حفظ",
+      "saving": "جارٍ الحفظ...",
+      "saved": "تم الحفظ",
+      "addPeakWindow": "إضافة نافذة ذروة",
+      "removePeakWindow": "حذف"
+    },
+    "validation": {
+      "cutoverHourRange": "ساعة البدء يجب أن تكون بين ٠ و٢٣",
+      "cutoverHourInteger": "ساعة البدء يجب أن تكون رقماً صحيحاً",
+      "lowStockNonNegative": "حد المخزون يجب أن يكون صفراً أو أكبر",
+      "lowStockInteger": "حد المخزون يجب أن يكون رقماً صحيحاً",
+      "peakTimeFormat": "صيغة الوقت يجب أن تكون HH:mm (مثال: ١٨:٠٠)"
     }
   },
   "billing": {

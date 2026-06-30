@@ -45,6 +45,10 @@ export function TopBarSimple({
     ...(isOwner ? [{ href: '/dashboard/reports', label: t('nav.reports') }] : []),
     // Billing: owner-only nav item (Phase 9, AC 28 — always reachable for owners).
     ...(isOwner ? [{ href: '/dashboard/billing', label: t('nav.billing') }] : []),
+    // Staff management: owner-only (Slice 2, ADR-0012).
+    ...(isOwner ? [{ href: '/dashboard/staff', label: t('nav.staff') }] : []),
+    // Settings: owner-only (Slice 2, ADR-0012 Decision C1).
+    ...(isOwner ? [{ href: '/dashboard/settings', label: t('nav.settings') }] : []),
   ];
 
   return (
