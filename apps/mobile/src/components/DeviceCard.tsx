@@ -111,6 +111,28 @@ const prepStyles = StyleSheet.create({
   },
 });
 
+// ─── Device-type chip palette (mirrors apps/web device-type chips) ───────────
+// A tinted pill makes the device class glanceable; color alone never conveys
+// status (that is the pill + dot + border) — this is purely categorical.
+const TYPE_CHIP: Record<string, { bg: string; fg: string }> = {
+  PS4: { bg: 'rgba(59,130,246,0.16)', fg: '#60A5FA' }, // blue
+  PS5: { bg: 'rgba(20,184,166,0.16)', fg: '#2DD4BF' }, // teal
+  VIP: { bg: 'rgba(245,158,11,0.16)', fg: '#FBBF24' }, // amber
+};
+const TYPE_CHIP_DEFAULT = { bg: 'rgba(148,163,184,0.16)', fg: colors.textMuted };
+
+function typeChip(deviceType: string) {
+  return TYPE_CHIP[deviceType?.toUpperCase?.()] ?? TYPE_CHIP_DEFAULT;
+}
+
+// Status-tinted card fill — a calm wash so free/busy/maint read at a glance,
+// reinforcing (never replacing) the pill + border. Mirrors the web uplift.
+const STATUS_FILL: Record<'free' | 'busy' | 'maintenance', string> = {
+  free: '#0C1A17',
+  busy: '#0F1726',
+  maintenance: '#12151C',
+};
+
 // ─── DeviceCard ───────────────────────────────────────────────────────────────
 
 export function DeviceCard({
@@ -163,19 +185,22 @@ export function DeviceCard({
         styles.card,
         {
           borderColor,
+          backgroundColor: STATUS_FILL[statusKey],
           opacity: isMaintenance ? 0.6 : pressed ? 0.9 : 1,
           transform: [{ scale: pressed && !isMaintenance ? 0.97 : 1 }],
         },
       ]}
     >
-      {/* Header row: name + type */}
+      {/* Header row: name + type chip */}
       <View style={styles.header}>
         <AppText role="h3" numberOfLines={1} style={styles.name}>
           {device.name}
         </AppText>
-        <AppText role="caption" color={colors.textMuted}>
-          {device.device_type}
-        </AppText>
+        <View style={[styles.typeChip, { backgroundColor: typeChip(device.device_type).bg }]}>
+          <AppText role="micro" color={typeChip(device.device_type).fg}>
+            {device.device_type}
+          </AppText>
+        </View>
       </View>
 
       {/* Status pill */}
@@ -256,8 +281,19 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1.5,
     padding: spacing.md,
-    gap: spacing.sm,
+    gap: spacing.xs,
     minHeight: TAP_TARGET * 2.2,
+    // Subtle elevation for depth (mirrors web e1); no-op where unsupported.
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+  },
+  typeChip: {
+    borderRadius: radius.xs,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
   },
   header: {
     flexDirection: 'row',
@@ -269,7 +305,7 @@ const styles = StyleSheet.create({
     marginEnd: spacing.xs,
   },
   content: {
-    marginTop: spacing.xs,
+    marginTop: spacing['2xs'],
   },
   freeContent: {
     gap: spacing.xs,
@@ -278,12 +314,13 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   quickBtn: {
-    alignSelf: 'flex-start',
+    alignSelf: 'stretch',
+    alignItems: 'center',
     backgroundColor: colors.primary,
-    borderRadius: radius.xs,
+    borderRadius: radius.sm,
     paddingHorizontal: spacing.sm,
-    paddingVertical: spacing['2xs'],
-    minHeight: 32,
+    paddingVertical: spacing.xs,
+    minHeight: 40,
     justifyContent: 'center',
   },
   quickBtnPressed: {
