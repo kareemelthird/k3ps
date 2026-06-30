@@ -92,7 +92,7 @@ export function TopProductsChart({ data, toggle, height = 280 }: TopProductsChar
             }}
             cursor={{ fill: 'rgba(148,163,184,0.08)' }}
           />
-          <Bar dataKey="value" fill={COLOR_BAR} radius={[0, 4, 4, 0]}>
+          <Bar dataKey="value" fill={COLOR_BAR} radius={[0, 4, 4, 0]} isAnimationActive={false}>
             <LabelList
               dataKey="value"
               position="right"

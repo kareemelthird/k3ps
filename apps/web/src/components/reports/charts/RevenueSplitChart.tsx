@@ -71,7 +71,7 @@ export function RevenueSplitChart({
             outerRadius="80%"
             dataKey="value"
             paddingAngle={hasData ? 2 : 0}
-            isAnimationActive={hasData}
+            isAnimationActive={false}
           >
             {plotSlices.map((entry) => (
               <Cell key={entry.name} fill={entry.color} />

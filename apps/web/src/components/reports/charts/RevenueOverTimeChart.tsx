@@ -117,8 +117,8 @@ export function RevenueOverTimeChart({ data, height = 240 }: RevenueOverTimeChar
             }
             wrapperStyle={{ color: COLOR_AXIS, fontSize: 12 }}
           />
-          <Bar dataKey="time"   name="time"   stackId="a" fill={COLOR_TIME}   radius={[0, 0, 0, 0]} />
-          <Bar dataKey="orders" name="orders" stackId="a" fill={COLOR_ORDERS} radius={[4, 4, 0, 0]} />
+          <Bar dataKey="time"   name="time"   stackId="a" fill={COLOR_TIME}   radius={[0, 0, 0, 0]} isAnimationActive={false} />
+          <Bar dataKey="orders" name="orders" stackId="a" fill={COLOR_ORDERS} radius={[4, 4, 0, 0]} isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>
     </div>
