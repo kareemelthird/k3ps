@@ -45,7 +45,7 @@ export function KpiCard({
 
   if (loading) {
     return (
-      <div className="rounded-md bg-surface border border-border shadow-e0 p-md flex flex-col gap-xs">
+      <div className="rounded-md bg-surface border border-border shadow-e1 p-md flex flex-col gap-xs">
         <Skeleton className="h-4 w-24" />
         <Skeleton className="h-8 w-32 mt-xs" />
         <Skeleton className="h-3 w-28" />
@@ -57,7 +57,7 @@ export function KpiCard({
     return (
       <div
         role="alert"
-        className="rounded-md bg-surface border border-border shadow-e0 p-md flex flex-col gap-xs min-h-[96px] justify-center"
+        className="rounded-md bg-surface border border-border shadow-e1 p-md flex flex-col gap-xs min-h-[96px] justify-center"
       >
         <p className="text-caption text-text-muted">{label}</p>
         <p className="text-caption text-danger">{t('state.error.generic')}</p>
@@ -77,7 +77,7 @@ export function KpiCard({
 
   return (
     <div
-      className="rounded-md bg-surface border border-border shadow-e0 p-md flex flex-col gap-xs"
+      className="rounded-md bg-surface border border-border shadow-e1 p-md flex flex-col gap-xs"
       aria-label={`${label}: ${formatted}`}
     >
       {/* Accent dot + label */}

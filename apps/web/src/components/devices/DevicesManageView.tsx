@@ -80,6 +80,17 @@ function ConfirmDialog({
   );
 }
 
+// ── Device-type chip tokens (matches DeviceCard.tsx) ─────────────────────────
+const MANAGE_TYPE_CHIP: Record<string, { bg: string; text: string }> = {
+  ps4: { bg: 'rgba(59,130,246,0.15)',  text: '#60A5FA' },
+  ps5: { bg: 'rgba(20,184,166,0.15)',  text: '#2DD4BF' },
+  vip: { bg: 'rgba(245,158,11,0.15)',  text: '#FBBF24' },
+};
+
+function getManageTypeChip(deviceType: string) {
+  return MANAGE_TYPE_CHIP[deviceType.toLowerCase()] ?? { bg: 'rgba(100,116,139,0.12)', text: '#94A3B8' };
+}
+
 // ─── Device card ──────────────────────────────────────────────────────────────
 
 interface DeviceCardProps {
@@ -106,6 +117,7 @@ function DeviceManageCard({
   t,
 }: DeviceCardProps) {
   const isInactive = !device.is_active;
+  const typeChip = getManageTypeChip(device.device_type);
 
   // Maintenance toggle is locked when device has an active session (guard requirement)
   const maintenanceLocked = hasActiveSession && device.status !== 'maintenance';
@@ -113,7 +125,7 @@ function DeviceManageCard({
   return (
     <article
       aria-label={`${device.name} — ${device.device_type}`}
-      className={`rounded-md bg-surface border p-md flex flex-col gap-sm transition-opacity
+      className={`rounded-md bg-surface border p-md flex flex-col gap-sm transition-opacity shadow-e1
         ${isInactive ? 'opacity-50 border-border' : 'border-border hover:border-border-strong'}`}
     >
       {/* Header row: name + type + status */}
@@ -129,8 +141,11 @@ function DeviceManageCard({
         <div className="flex-1 min-w-0">
           <h3 className="text-body font-medium text-text">{device.name}</h3>
           <div className="flex flex-wrap items-center gap-xs mt-xs">
-            {/* Device type badge */}
-            <span className="text-micro font-medium bg-surface-3 text-text-muted px-xs py-1 rounded-xs uppercase tracking-wider">
+            {/* Device-type chip (PS4 = blue, PS5 = teal, VIP = amber) */}
+            <span
+              className="text-micro font-semibold uppercase tracking-wider px-xs py-[2px] rounded-xs"
+              style={{ backgroundColor: typeChip.bg, color: typeChip.text }}
+            >
               {device.device_type}
             </span>
             {/* Status pill */}
