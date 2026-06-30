@@ -38,6 +38,8 @@ export function TopBarSimple({
     { href: '/dashboard', label: t('nav.devices') },
     { href: '/dashboard/rate-rules', label: t('nav.rateRules') },
     { href: '/dashboard/products', label: t('nav.products') },
+    // Devices management: owner-only (create/edit/maintenance — AC F1–F7).
+    ...(isOwner ? [{ href: '/dashboard/devices', label: t('nav.devicesManage') }] : []),
     // Reports: owner-only nav item (AC 12 / design §2).
     // The nav item is hidden for non-owners (empty-nav-state pattern).
     ...(isOwner ? [{ href: '/dashboard/reports', label: t('nav.reports') }] : []),

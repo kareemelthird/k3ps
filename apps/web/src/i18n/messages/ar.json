@@ -137,7 +137,60 @@
     "empty": {
       "title": "لا توجد أجهزة",
       "body": "لم يتم إضافة أجهزة لهذا الفرع بعد"
-    }
+    },
+    "edit": "تعديل",
+    "manage": {
+      "title": "إدارة الأجهزة",
+      "subtitle": "إضافة وتعديل وتفعيل الأجهزة في الفرع المحدد",
+      "create": "إضافة جهاز",
+      "edit": "تعديل الجهاز"
+    },
+    "denied": {
+      "title": "الوصول مقيد",
+      "body": "إدارة الأجهزة متاحة للمالك فقط",
+      "backToDashboard": "العودة للوحة التحكم"
+    },
+    "filter": {
+      "allTypes": "كل الأنواع",
+      "allStatuses": "كل الحالات",
+      "active": "نشط",
+      "inactive": "غير نشط",
+      "search": "ابحث باسم الجهاز"
+    },
+    "type": {
+      "PS4": "PS4",
+      "PS5": "PS5",
+      "VIP": "VIP",
+      "other": "أخرى"
+    },
+    "field": {
+      "name": "اسم الجهاز",
+      "nameHelper": "مثال: PS5-1 أو VIP سالون",
+      "deviceType": "نوع الجهاز",
+      "sortOrder": "ترتيب العرض",
+      "sortOrderHelper": "الأرقام الأصغر تظهر أولاً في القائمة",
+      "isActive": "نشط"
+    },
+    "action": {
+      "save": "حفظ",
+      "cancel": "إلغاء",
+      "deactivate": "تعطيل",
+      "reactivate": "تفعيل",
+      "maintenance": "وضع الصيانة",
+      "releaseMaintenance": "إلغاء الصيانة",
+      "deactivateConfirm": "هل تريد تعطيل هذا الجهاز؟ لن يُحذف — سيُحفظ للمراجعة التاريخية.",
+      "reactivateConfirm": "هل تريد تفعيل هذا الجهاز مجدداً؟",
+      "maintenanceConfirm": "هل تريد وضع الجهاز في وضع الصيانة؟",
+      "releaseMaintenanceConfirm": "هل تريد إلغاء وضع الصيانة وإعادة الجهاز للخدمة؟"
+    },
+    "validation": {
+      "nameRequired": "اسم الجهاز مطلوب",
+      "sortOrderInvalid": "ترتيب العرض يجب أن يكون رقماً صحيحاً غير سالب"
+    },
+    "guard": {
+      "hasBusySession": "الجهاز مشغول بجلسة نشطة — لا يمكن التعديل أو التعطيل الآن"
+    },
+    "ownerOnly": "يتطلب صلاحية المالك للكتابة"
   },
   "device": {
     "status": {
@@ -207,6 +260,7 @@
   },
   "nav": {
     "devices": "الأجهزة",
+    "devicesManage": "إدارة الأجهزة",
     "sessions": "الجلسات",
     "dashboard": "لوحة التحكم",
     "rateRules": "قواعد الأسعار",
